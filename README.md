@@ -1,5 +1,3 @@
-# Jews-Genetics-Project
-
 # Lund University BINP50 Master's Thesis Project in bioinformatics: 
 ## Identifying a fine genetic structure across Ashkenazic Jews
 
