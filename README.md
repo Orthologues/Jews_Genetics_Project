@@ -245,7 +245,7 @@ familynames:     NO" > par.1240K_MAP.PACKEDPED
 #### 4. 343 AJs (221 mixed-origin and 122 single-origin) from Gladstein et al. 2019 (https://pubmed.ncbi.nlm.nih.gov/30840069/) at ~710K SNPs
 #### 5. 147 AJs and 240 other Jews from Kopelman et al. 2020 (https://pubmed.ncbi.nlm.nih.gov/31919450/) at ~470K SNPs
 
-#### The annotation file for the pre-QC 1413 Jewish individuals is hosted at 
+#### The annotation file for the 1413 pre-QC Jewish individuals is hosted at <a>https://github.com/Orthologues/Jews-Genetics-Project</a>
 
 #### The original merged dataset is hosted at 
 
