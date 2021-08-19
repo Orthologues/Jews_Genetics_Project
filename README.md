@@ -1,4 +1,4 @@
-# Lund University BINP50 Master's Thesis Project in bioinformatics: 
+## Lund University BINP50 Master's Thesis Project in bioinformatics: 
 ## Identifying a fine genetic structure across Ashkenazic Jews
 
 #### Author: Jiawei Zhao (ji8842zh-s@student.lu.se)
