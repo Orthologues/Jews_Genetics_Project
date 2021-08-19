@@ -247,10 +247,10 @@ familynames:     NO" > par.1240K_MAP.PACKEDPED
 
 #### The annotation file for the 1413 pre-QC Jewish individuals is hosted at <a>https://github.com/Orthologues/Jews-Genetics-Project/blob/main/pre_QC_1413_Jews_annotation.csv</a>
 
-#### The original merged dataset is hosted at 
+#### The original merged dataset is hosted at <a>https://github.com/Orthologues/Jews-Genetics-Project/blob/main/pre_QC_1413_Jews_original_gt.tar.gz</a>
 
-#### The merged dataset post extraction of Genochip-SNPs is hosted at 
+#### The merged dataset post extraction of Genochip-SNPs is hosted at <a>https://github.com/Orthologues/Jews-Genetics-Project/blob/main/</a>
 
-#### The merged dataset post imputation (for IBD inference) is hosted at
+#### The merged dataset post imputation (for IBD inference) is hosted at <a>https://github.com/Orthologues/Jews-Genetics-Project/blob/main/</a>
 
 ### Collect genotype data of modern non-Jewish individuals
