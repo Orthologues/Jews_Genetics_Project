@@ -13,6 +13,19 @@
 [Section IV: IBD inference by <code>phasedibd</code> and Extract of IBD segments](#sec4) <br />
 + [Run phasedibd](#run-phasedibd)
 + [Removing replicate individuals and close relatives(minimally half-cousins) from Jewish individuals](#jew-qc)
++ [Extracting IBD segments between and within AJs, other Jews, and non-Jews](#ibd-analyses)
+[Section V: Statistical and Hierarchical Clustering analyses (HCA) in R for IBD](#sec5) <br />
++ [K-S test for the "local European proselyte hypothesis" for each AJ community](#null-hyp)
++ [Heatmap and HCA 12 AJ communities](#aj-ibd)
++ [Heatmap and HCA for all non-Jewish populations](#nj-ibd)
++ [Heatmap, HCA, and K-S test for all non-Jewish populations and 12 AJ communities](#nj-all-aj-ibd)
++ [Heatmap and HCA for all non-Jewish populations and each of the 12 AJ communities](#nj-each-aj-ibd)
++ [Plotting all NJ populations, and closest NJ populations with each AJ community at map](#nj-map)
+[Section VI: Preprocessing in Python, Plotting and HCA in R for GPS predictions](#sec6) <br />
++ [Relocalize each AJ predicted to sea by GPS to the nearest shore in Python](#to-shore)
++ [Heatmap HCA for GPS predictions in R](#gps-analyses)
++ [Plotting biogeographical coordinates predicted by GPS in R](#aj-gps-map)
+
 
 <hr />
 
@@ -4800,6 +4813,8 @@ rm Bray2010_Behar1013_Gladstein2019_Kopelman2020_902Jews.csv
 ### After filtering, we have 288 single-origin AJs, 221 mixed-origin AJs and 393 other Jews, i.e. 509 AJs and 393 OJs.
 
 
+<a name="ibd-analyses"></a>
+
 ### Hence, let's run IBD analyses using the new annotation file consisting of 901 Jews.
 ### Additionally,  we would like to extract specified inter-population or intra-population IBD segments at 22 autosomes to a file for each pair.
 
@@ -6089,3 +6104,2602 @@ if __name__ == '__main__':
     pool.close()
     pool.join()
 ```
+
+
+<a name="sec5"></a>
+# Section V: Statistical and Hierarchical Clustering analyses in R for IBD
+
+```R
+library(devtools)
+## manually install a lower version of the package "foreign" as a dependency for "car"
+install.packages("https://cran.r-project.org/src/contrib/Archive/foreign/foreign_0.8-76.tar.gz")
+## install an earlier version of "car" to suit R 3.6
+install_version("car", version = "3.0-2", repos = "http://cran.us.r-project.org")
+install.packages("MultNonParam")
+install.packages("moments") # to use the function "skewness()"
+install.packages("Hmisc")
+install.packages("tidyverse")
+install.packages("plyr")
+install.packages("dplyr")
+install.packages("cluster")
+install.packages("gplots")
+install.packages('dendextend')
+install.packages('colorspace')
+install.packages('Rmisc')
+```
+
+```R
+library(ggplot2)
+library(tidyr)
+library(plyr)
+library(dplyr)
+library(gplots)
+library(car)
+library(stats)
+library(MultNonParam)
+library(data.table)
+library(moments)
+library(Hmisc)
+library(tidyverse)
+library(dendextend)
+library(colorspace)
+library(Rmisc)
+```
+
+#### Define the function to extract IBD data within a Jewish population. rtype: df
+
+```R
+get_jews_intra_ibd <- function(jew_pop) {
+    jews_intra_ibd_fname <- paste(c("Jewish_pop_intra_IBD/", jew_pop, "_intraIBD.csv"), collapse = "")
+    jews_intra_df <- read.csv(jews_intra_ibd_fname)
+    colnames(jews_intra_df)[1] <- 'iid'
+    jews_intra_df <- filter(jews_intra_df, IBD_cM <= 20)
+    jews_intra_df$iid <- as.character(jews_intra_df$iid)
+    jews_intra_df$pop1_iid <- sapply(strsplit(jews_intra_df$iid, split='__'), `[`, 1)
+    jews_intra_df$pop2_iid <- sapply(strsplit(jews_intra_df$iid, split='__'), `[`, 2)
+    jews_intra_df <- jews_intra_df %>% select(-c("iid"))
+    jews_intra_df$pop1 <- jew_pop
+    jews_intra_df$pop2 <- jew_pop
+    jews_intra_df <- jews_intra_df[c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")]
+    return(jews_intra_df)
+}
+```
+
+#### Extract IBD segments within a Jewish population
+
+
+```R
+get_jews_intra_ibd_seg_df <- function(jew_pop) {
+    ibd_seg_fname <- paste("IBD_segments_intra_Jewish_pops/", jew_pop, "_IBD_segs.csv", sep = "") 
+    ibd_seg_df <- read.csv(ibd_seg_fname)
+    ibd_seg_df$id1_id2 <- paste(ibd_seg_df$id1, ibd_seg_df$id2, sep="__")
+    ibd_len_summary <- ibd_seg_df %>% group_by(id1, id2) %>% summarise(
+       ibd_len_sum = sum(cm_len)
+     )
+    ibd_len_summary_outlier <- ibd_len_summary %>% filter(ibd_len_sum > 20)
+    ibd_len_summary_outlier$id1_id2 <- paste(ibd_len_summary_outlier$id1, ibd_len_summary_outlier$id2, sep="__")
+    ibd_seg_df <- filter(ibd_seg_df, !ibd_seg_df$id1_id2 %in% ibd_len_summary_outlier$id1_id2)
+    return(ibd_seg_df)
+}
+```
+
+#### Define the function to extract IBD data between two AJ sub-populations. rtype: df
+
+
+```R
+get_aj_oaj_ibd <- function(aj_pop1, aj_pop2) {
+    inter_ibd_fname <- paste("aj_pops_inter_IBD/", aj_pop1, "_IBD.csv", sep='')
+    inter_ibd_df <- read.csv(inter_ibd_fname)
+    inter_ibd_df <- pivot_longer(inter_ibd_df, cols=-1, names_to="pop1_iid", values_to="IBD_cM")
+    colnames(inter_ibd_df)[1] <- c("pop2_iid")
+    inter_ibd_df$pop1 <- aj_pop1 
+    inter_ibd_df$pop1_iid <- gsub("^X", "", inter_ibd_df$pop1_iid)
+    ### Convert factor to character
+    inter_ibd_df$pop2_iid <- as.character(inter_ibd_df$pop2_iid)
+    inter_ibd_df$pop2 <- sapply(strsplit(inter_ibd_df$pop2_iid, split='__'), `[`, 1)
+    inter_ibd_df$pop2_iid <- sapply(strsplit(inter_ibd_df$pop2_iid, split='__'), `[`, 2)
+    filtered_inter_two_pops_df <- inter_ibd_df %>% filter(IBD_cM <= 20 & pop2==aj_pop2)
+    filtered_inter_two_pops_df <- filtered_inter_two_pops_df[c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")]
+    return(filtered_inter_two_pops_df)
+}
+```
+
+
+```R
+get_aj_inter_ibd_seg_df <- function(aj_pop1, aj_pop2) {
+    ibd_seg_fname <- paste("IBD_segments_inter_aj_pops/", aj_pop1, "__", aj_pop2, "_IBD_segs.csv", sep = "") 
+    ibd_seg_df <- read.csv(ibd_seg_fname)
+    ibd_seg_df$id1_id2 <- paste(ibd_seg_df$id1, ibd_seg_df$id2, sep="__")
+    ibd_len_summary <- ibd_seg_df %>% group_by(id1, id2) %>% summarise(
+       ibd_len_sum = sum(cm_len)
+     )
+    ibd_len_summary_outlier <- ibd_len_summary %>% filter(ibd_len_sum > 20)
+    ibd_len_summary_outlier$id1_id2 <- paste(ibd_len_summary_outlier$id1, ibd_len_summary_outlier$id2, sep="__")
+    ibd_seg_df <- filter(ibd_seg_df, !ibd_seg_df$id1_id2 %in% ibd_len_summary_outlier$id1_id2)
+    return(ibd_seg_df)
+}
+```
+
+#### Define the function to extract IBD data between an AJ sub-population and another (non-AJ) Jewish population. rtype: df
+
+
+```R
+get_aj_oj_ibd <- function(aj_pop, oj_location) {
+    ## $oj_location is a string like "Madrid-Spain"
+    AJ_otherJ_fname <- paste(aj_pop, "_otherJew.csv", sep="")
+    OJ_pop <- paste(oj_location, "otherJew", sep="_")
+    AJ_otherJ_df <- read.csv(AJ_otherJ_fname)
+    ## "oj" refers to other-Jews
+    ## Melt down the dataframe and rename column "X" to "pop2_iid"
+    AJ_otherJ_df <- pivot_longer(AJ_otherJ_df, cols=-1, names_to="pop1_iid", values_to="IBD_cM")
+    colnames(AJ_otherJ_df)[1] <- c("pop2_iid")
+    ## See how many other-Jewish pops are present
+    AJ_otherJ_df$pop1_iid <- gsub("^X", "", AJ_otherJ_df$pop1_iid)
+    AJ_otherJ_df$pop1 <- aj_pop
+    ## Find which other-Jewish pop does each row belong to, store it to column "pop2_iid"
+    AJ_otherJ_df$pop2_iid <- as.character(AJ_otherJ_df$pop2_iid)
+    ## `[` is a function for subsetting in R
+    oj_indiv_pop <- sapply(strsplit(AJ_otherJ_df$pop2_iid, split='__'), `[`, 1)
+    oj_indiv_pop <- paste(oj_indiv_pop, "otherJew", sep="_")
+    oj_indiv_id <- sapply(strsplit(AJ_otherJ_df$pop2_iid, split='__'), `[`, 2)
+    AJ_otherJ_df$pop2 <- oj_indiv_pop
+    AJ_otherJ_df$pop2_iid <- oj_indiv_id
+    filtered_AJ_OJ_paired_df <- AJ_otherJ_df %>% filter(IBD_cM <= 20 & pop2==OJ_pop)
+    if ("Mosul-Iraq_otherJew" %in% as.vector(filtered_AJ_OJ_paired_df$pop2)) {
+      filtered_AJ_OJ_paired_df$pop2 <- gsub("Mosul-Iraq", "Kurdistan", filtered_AJ_OJ_paired_df$pop2)
+    } else {
+      filtered_AJ_OJ_paired_df$pop2 <- gsub("[A-Za-z]+-", "", filtered_AJ_OJ_paired_df$pop2)
+    }
+    filtered_AJ_OJ_paired_df <- filtered_AJ_OJ_paired_df[c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")]
+    return(filtered_AJ_OJ_paired_df)
+}
+```
+
+
+```R
+get_aj_oj_ibd_seg_df <- function(aj_pop, oj_loc) {
+    ibd_seg_fname <- paste("IBD_segments_AJ_subpop_vs_23_otherJ_pop/", aj_pop, "__", oj_loc, 
+                           "OJ_IBD_segs.csv", sep = "") 
+    ibd_seg_df <- read.csv(ibd_seg_fname)
+    ibd_seg_df$id1_id2 <- paste(ibd_seg_df$id1, ibd_seg_df$id2, sep="__")
+    ibd_len_summary <- ibd_seg_df %>% group_by(id1, id2) %>% summarise(
+       ibd_len_sum = sum(cm_len)
+     )
+    ibd_len_summary_outlier <- ibd_len_summary %>% filter(ibd_len_sum > 20)
+    ibd_len_summary_outlier$id1_id2 <- paste(ibd_len_summary_outlier$id1, ibd_len_summary_outlier$id2, sep="__")
+    ibd_seg_df <- filter(ibd_seg_df, !ibd_seg_df$id1_id2 %in% ibd_len_summary_outlier$id1_id2)
+    return(ibd_seg_df)
+}
+```
+
+#### Define the function to extract IBD data between an AJ sub-population and a non-Jewish population. rtype: df
+
+
+```R
+get_aj_nj_ibd <- function(aj_pop, nj_pop_name) {
+    AJ_nonJ_fname <- paste(aj_pop, "_nonJew.csv", sep="")
+    AJ_nonJ_df <- read.csv(AJ_nonJ_fname)
+    ## "nj" refers to non-Jews 
+    ## Melt down the dataframe and rename column "X" to "pop2_iid"
+    AJ_nonJ_df <- pivot_longer(AJ_nonJ_df, cols=-1, names_to="pop1_iid", values_to="IBD_cM")
+    colnames(AJ_nonJ_df)[1] <- c("pop2_iid")
+    ## Filter out any individual pairs with IBD sharing > 20cM
+    ## See how many non-Jewish pops are present
+    AJ_nonJ_df$pop1_iid <- gsub("^X", "", AJ_nonJ_df$pop1_iid)
+    AJ_nonJ_df$pop1 <- aj_pop
+    ## Find which non-Jewish pop does each row belong to, store it to column "pop2_iid"
+    AJ_nonJ_df$pop2_iid <- AJ_nonJ_df$pop2_iid %>% as.character
+    AJ_nonJ_df$pop2 <- sapply(strsplit(AJ_nonJ_df$pop2_iid, split='__'), `[`, 1)
+    AJ_nonJ_df$pop2_iid <- sapply(strsplit(AJ_nonJ_df$pop2_iid, split='__'), `[`, 2)
+    filtered_AJ_nonJ_paired_df <- AJ_nonJ_df %>% filter(pop2==nj_pop_name & IBD_cM <= 20)
+    filtered_AJ_nonJ_paired_df <- filtered_AJ_nonJ_paired_df[c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")]
+    return(filtered_AJ_nonJ_paired_df)
+}
+```
+
+
+```R
+get_aj_nj_ibd_seg_df <- function(aj_pop, nj_pop) {
+    ibd_seg_fname <- paste("IBD_segments_AJ_subpop_vs_76_nonJ_pop/", aj_pop, "__", nj_pop, 
+                           "_IBD_segs.csv", sep = "") 
+    ibd_seg_df <- read.csv(ibd_seg_fname)
+    ibd_seg_df$id1_id2 <- paste(ibd_seg_df$id1, ibd_seg_df$id2, sep="__")
+    ibd_len_summary <- ibd_seg_df %>% group_by(id1, id2) %>% summarise(
+       ibd_len_sum = sum(cm_len)
+     )
+    ibd_len_summary_outlier <- ibd_len_summary %>% filter(ibd_len_sum > 20)
+    ibd_len_summary_outlier$id1_id2 <- paste(ibd_len_summary_outlier$id1, ibd_len_summary_outlier$id2, sep="__")
+    ibd_seg_df <- filter(ibd_seg_df, !ibd_seg_df$id1_id2 %in% ibd_len_summary_outlier$id1_id2)
+    return(ibd_seg_df)
+}
+```
+
+#### Define the function to extract IBD data within a non-Jewish population. rtype: df
+
+```R
+get_nj_intra_ibd_df <- function(nj_pop_name) {
+    nj_intra_ibd_fname <- paste(c("76_nonJ_pop_intra_IBD/", nj_pop_name, "_intraIBD.csv"), collapse = "")
+    nj_intra_df <- read.csv(nj_intra_ibd_fname)
+    colnames(nj_intra_df)[1] <- 'iid'
+    nj_intra_df <- filter(nj_intra_df, IBD_cM <= 20)
+    nj_intra_df$iid <- as.character(nj_intra_df$iid)
+    nj_intra_df$pop1_iid <- sapply(strsplit(nj_intra_df$iid, split='__'), `[`, 1)
+    nj_intra_df$pop2_iid <- sapply(strsplit(nj_intra_df$iid, split='__'), `[`, 2)
+    nj_intra_df <- nj_intra_df %>% select(-c("iid"))
+    nj_intra_df$pop1 <- nj_pop_name
+    nj_intra_df$pop2 <- nj_pop_name
+    nj_intra_df <- nj_intra_df[c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")]
+    return(nj_intra_df)
+}
+```
+
+
+```R
+get_nj_intra_ibd_seg_df <- function(nj_pop) {
+    ibd_seg_fname <- paste("IBD_segments_intra_76_nonJ_pops/", nj_pop, "_IBD_segs.csv", sep = "") 
+    ibd_seg_df <- read.csv(ibd_seg_fname)
+    ibd_seg_df$id1_id2 <- paste(ibd_seg_df$id1, ibd_seg_df$id2, sep="__")
+    ibd_len_summary <- ibd_seg_df %>% group_by(id1, id2) %>% summarise(
+       ibd_len_sum = sum(cm_len)
+     )
+    ibd_len_summary_outlier <- ibd_len_summary %>% filter(ibd_len_sum > 20)
+    ibd_len_summary_outlier$id1_id2 <- paste(ibd_len_summary_outlier$id1, ibd_len_summary_outlier$id2, sep="__")
+    ibd_seg_df <- filter(ibd_seg_df, !ibd_seg_df$id1_id2 %in% ibd_len_summary_outlier$id1_id2)
+    return(ibd_seg_df)
+}
+```
+
+#### Define the function to extract IBD data between two non-Jewish populations. rtype: df
+
+
+```R
+get_nj_inter_df <- function(nj_pop1, nj_pop2) {
+    nj1_inter_ibd_fname <- paste(c("76_nonJ_pop_inter_IBD/", nj_pop1, "_IBD.csv"), collapse = "")
+    nj1_inter_df <- read.csv(nj1_inter_ibd_fname)
+    nj1_inter_df <- pivot_longer(nj1_inter_df, cols=-1, names_to="pop1_iid", values_to="IBD_cM")
+    nj1_inter_df$pop1_iid <- gsub("^X", "", nj1_inter_df$pop1_iid)
+    nj1_inter_df$pop1 <- nj_pop1
+    ## Find which other-Jewish pop does each row belong to, store it to column "pop2_iid"
+    colnames(nj1_inter_df)[1] <- c("pop2_iid")
+    nj1_inter_df$pop2_iid <- as.character(nj1_inter_df$pop2_iid)
+    ## `[` is a function for subsetting in R
+    nj1_inter_df$pop2 <- sapply(strsplit(nj1_inter_df$pop2_iid, split='__'), `[`, 1)
+    nj1_inter_df$pop2_iid <- sapply(strsplit(nj1_inter_df$pop2_iid, split='__'), `[`, 2)
+    nj1_inter_df <- nj1_inter_df[c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")]
+    filtered_nj1_nj2_inter_df <- filter(nj1_inter_df, IBD_cM <= 20, pop2==nj_pop2)
+    return(filtered_nj1_nj2_inter_df)
+}
+```
+
+
+```R
+get_nj_inter_ibd_seg_df <- function(nj_pop1, nj_pop2) {
+    ibd_seg_fname <- paste("IBD_segments_inter_76_nonJ_pops/", nj_pop1, "__", nj_pop2, 
+                           "_IBD_segs.csv", sep = "") 
+    ibd_seg_df <- read.csv(ibd_seg_fname)
+    ibd_seg_df$id1_id2 <- paste(ibd_seg_df$id1, ibd_seg_df$id2, sep="__")
+    ibd_len_summary <- ibd_seg_df %>% group_by(id1, id2) %>% summarise(
+       ibd_len_sum = sum(cm_len)
+     )
+    ibd_len_summary_outlier <- ibd_len_summary %>% filter(ibd_len_sum > 20)
+    ibd_len_summary_outlier$id1_id2 <- paste(ibd_len_summary_outlier$id1, ibd_len_summary_outlier$id2, sep="__")
+    ibd_seg_df <- filter(ibd_seg_df, !ibd_seg_df$id1_id2 %in% ibd_len_summary_outlier$id1_id2)
+    return(ibd_seg_df)
+}
+```
+
+
+<a name="null-hyp"></a>
+### Testing the "local European proselyte hypothesis", i.e., the "null hypothesis" for each AJ community
+
+```R
+## We exclude Slovakian & Moldovian AJs from our analysis since both countries have only 1 AJ sample.
+## Minimum number of AJ a country should >=3
+## Use Germans as the proxy population for both Austrian and Dutch people since we do not have those two
+
+main_aj_country_pops <- 
+list(c("GermanyAJ", "German"), 
+     c("PolandAJ", "Polish"), 
+     c("LithuaniaAJ", "Lithuanian"),
+     c("AustriaAJ", "German"),
+     c("BelarusAJ", "Belarusian"),
+     c("UkraineAJ", "Ukrainian"), 
+     c("RussiaAJ", "Russian"),
+     c("HungaryAJ", "Hungarian"),
+     c("RomaniaAJ", "Romanian"),
+     c("NetherlandsAJ","German"),
+     c("LatviaAJ", "Latvian"),
+     c("CzechiaAJ", "Czech")
+    )
+```
+
+```R
+## create an empty dataframe $extra_ibd_kstest_pval_df to store the p-values from KS-test
+
+extra_ibd_kstest_colnames <- c("AJ_pop", "local_nonJ_pop", 
+             "AJ-AJ_mean", "AJ-AJ_N", "AJ-AJ_IBD_seg_N",
+             "AJ-AJ_IBD_seg_mean_len", "AJ-AJ_IBD_seg_median_len", "AJ-AJ_IBD_seg_len_skewness", 
+             "AJ-nonJ_mean", "AJ-nonJ_N", "AJ-nonJ_IBD_seg_N",
+             "AJ-nonJ_IBD_seg_mean_len", "AJ-nonJ_IBD_seg_median_len", "AJ-nonJ_IBD_seg_len_skewness", 
+             "nonJ-nonJ_mean", "nonJ-nonJ_N", "nonJ-nonJ_IBD_seg_N",
+             "nonJ-nonJ_IBD_seg_mean_len", "nonJ-nonJ_IBD_seg_median_len", "nonJ-nonJ_IBD_seg_len_skewness", 
+             "AJ-AJ_vs_AJ-nonJ_kstest_pval", 
+             "AJ-AJ_vs_AJ-nonJ_kstest_D",
+             "nonJ-nonJ_vs_AJ-nonJ_kstest_pval",
+             "nonJ-nonJ_vs_AJ-nonJ_kstest_D"
+            )
+extra_ibd_kstest_colnames_readable <- c("country", "pop1", "pop2", "pairwise_mean_len", "N_pairs", "N_segs", 
+                                        "segs_mean_len", "P-value"
+                                       )
+
+extra_ibd_kstest_pval_df <- data.frame(matrix(, ncol = length(extra_ibd_kstest_colnames), nrow = 0))
+extra_ibd_kstest_pval_df_readable <- data.frame(matrix(, ncol = length(extra_ibd_kstest_colnames_readable), 
+                                                       nrow = 0))
+colnames(extra_ibd_kstest_pval_df) <- extra_ibd_kstest_colnames
+extra_ibd_kstest_pval_df
+colnames(extra_ibd_kstest_pval_df_readable) <- extra_ibd_kstest_colnames_readable
+extra_ibd_kstest_pval_df_readable
+
+for (aj_country_pops in main_aj_country_pops){ 
+    ## example of $aj_pop1: "GermanyAJ"
+    aj_pop <- aj_country_pops[1]
+    intra_aj_ibd <- get_jews_intra_ibd(aj_pop)$IBD_cM
+    intra_aj_ibd_segs <- get_jews_intra_ibd_seg_df(jew_pop = aj_pop)$cm_len
+    aj_aj_ibd_mean <- mean(intra_aj_ibd)
+    aj_aj_ibd_N <- length(intra_aj_ibd)
+    aj_aj_IBD_seg_N <- length(intra_aj_ibd_segs)
+    aj_aj_IBD_seg_len_mean <- intra_aj_ibd_segs %>% mean(na.rm = TRUE)
+    aj_aj_IBD_seg_len_median <- intra_aj_ibd_segs %>% median(na.rm = TRUE)
+    aj_aj_IBD_seg_len_skewness <- intra_aj_ibd_segs %>% skewness
+    ## example of $nj_pop1: "German"
+    nj_pops <- aj_country_pops[-1]
+    ### loop through $interested_pop_clusters
+    for (nj_pop in nj_pops) {
+        aj_nj_ibd <- get_aj_nj_ibd(aj_pop, nj_pop)$IBD_cM
+        aj_nj_ibd_segs <- get_aj_nj_ibd_seg_df(aj_pop, nj_pop)$cm_len
+        intra_nj_ibd <- get_nj_intra_ibd_df(nj_pop)$IBD_cM
+        intra_nj_ibd_segs <- get_nj_intra_ibd_seg_df(nj_pop)$cm_len
+        if (intra_aj_ibd %>% length >0 && aj_nj_ibd %>% length >0) {
+            aj_aj_vs_aj_nj_kstest <- ks.test(aj_nj_ibd, intra_aj_ibd, alternative="greater")
+            aj_aj_vs_aj_nj_pval <- aj_aj_vs_aj_nj_kstest$p.value
+            aj_aj_vs_aj_nj_D <- aj_aj_vs_aj_nj_kstest$statistic
+            aj_nj_ibd_mean <- mean(aj_nj_ibd)
+            aj_nj_ibd_N <- length(aj_nj_ibd)
+            aj_nj_IBD_seg_N <- length(aj_nj_ibd_segs)
+            aj_nj_IBD_seg_len_mean <- aj_nj_ibd_segs %>% mean(na.rm = TRUE)
+            aj_nj_IBD_seg_len_median <- aj_nj_ibd_segs %>% median(na.rm = TRUE)
+            aj_nj_IBD_seg_len_skewness <- aj_nj_ibd_segs %>% skewness
+        }
+        if (aj_nj_ibd %>% length >0 && intra_nj_ibd %>% length >0) {
+            aj_nj_vs_nj_nj_kstest <- ks.test(aj_nj_ibd, intra_nj_ibd, alternative="greater")
+            nj_nj_ibd_mean <- mean(intra_nj_ibd)
+            nj_nj_ibd_N <- length(intra_nj_ibd)
+            aj_nj_vs_nj_nj_pval <- aj_nj_vs_nj_nj_kstest$p.value
+            aj_nj_vs_nj_nj_D <- aj_nj_vs_nj_nj_kstest$statistic
+            nj_nj_IBD_seg_N <- length(intra_nj_ibd_segs)
+            nj_nj_IBD_seg_len_mean <- intra_nj_ibd_segs %>% mean(na.rm = TRUE)
+            nj_nj_IBD_seg_len_median <- intra_nj_ibd_segs %>% median(na.rm = TRUE)
+            nj_nj_IBD_seg_len_skewness <- intra_nj_ibd_segs %>% skewness
+        }
+        ibd_row <- list(aj_pop, nj_pop, 
+                        aj_aj_ibd_mean, 
+                        aj_aj_ibd_N,
+                        aj_aj_IBD_seg_N,
+                        aj_aj_IBD_seg_len_mean,
+                        aj_aj_IBD_seg_len_median,
+                        aj_aj_IBD_seg_len_skewness,
+                        aj_nj_ibd_mean,
+                        aj_nj_ibd_N,
+                        aj_nj_IBD_seg_N,
+                        aj_nj_IBD_seg_len_mean,
+                        aj_nj_IBD_seg_len_median,
+                        aj_nj_IBD_seg_len_skewness,
+                        nj_nj_ibd_mean,
+                        nj_nj_ibd_N,
+                        nj_nj_IBD_seg_N,
+                        nj_nj_IBD_seg_len_mean,
+                        nj_nj_IBD_seg_len_median,
+                        nj_nj_IBD_seg_len_skewness,
+                        aj_aj_vs_aj_nj_pval, 
+                        aj_aj_vs_aj_nj_D,
+                        aj_nj_vs_nj_nj_pval,
+                        aj_nj_vs_nj_nj_D
+                        )
+        country <- gsub("AJ", "", aj_pop)
+        ibd_row1 <- list(country, "AJ", "non-Jew", aj_nj_ibd_mean, aj_nj_ibd_N, aj_nj_IBD_seg_N,
+                         aj_nj_IBD_seg_len_mean, "")
+        ibd_row2 <- list(country, "AJ", "AJ", aj_aj_ibd_mean, aj_aj_ibd_N, aj_aj_IBD_seg_N,
+                         aj_aj_IBD_seg_len_mean, aj_aj_vs_aj_nj_pval)
+        ibd_row3 <- list(country, "non-Jew", "non-Jew", nj_nj_ibd_mean, nj_nj_ibd_N, nj_nj_IBD_seg_N,
+                         nj_nj_IBD_seg_len_mean, aj_nj_vs_nj_nj_pval)
+                               
+        extra_ibd_kstest_pval_df[nrow(extra_ibd_kstest_pval_df)+1, ] <- ibd_row
+        extra_ibd_kstest_pval_df_readable[nrow(extra_ibd_kstest_pval_df_readable)+1, ] <- ibd_row1
+        extra_ibd_kstest_pval_df_readable[nrow(extra_ibd_kstest_pval_df_readable)+1, ] <- ibd_row2
+        extra_ibd_kstest_pval_df_readable[nrow(extra_ibd_kstest_pval_df_readable)+1, ] <- ibd_row3
+    }
+}
+
+write.csv(extra_ibd_kstest_pval_df_readable, 
+          "../phasedibd_result_kstest_AJ-localNJ_readable.csv", row.names = FALSE)
+## finally, write all p-values to a CSV file
+write.csv(extra_ibd_kstest_pval_df,"../phasedibd_result_kstest_AJ-localNJ.csv", row.names = FALSE)
+```
+
+<a name="aj-ibd"></a>
+## Apply Hierarchical Clustering Analyses to IBD data 
+
+```R
+all_aj_countries <- c("Netherlands", "Germany", "Czechia", "Latvia", "Austria",
+                      "Poland", "Ukraine", "Russia", "Lithuania", "Hungary", "Romania", "Belarus")
+aj_pop_ibd_mt <- data.frame(matrix(, ncol = length(all_aj_countries), nrow = length(all_aj_countries)))
+colnames(aj_pop_ibd_mt) <- all_aj_countries
+rownames(aj_pop_ibd_mt) <- all_aj_countries
+for (row_country in all_aj_countries){
+    for (col_country in all_aj_countries){
+        col_pop <- paste(col_country, "AJ", sep="")
+        if (row_country == col_country) {
+            intra_ibd_fname <- paste("Jewish_pop_intra_IBD/", row_country, "AJ_intraIBD.csv", sep='')
+            intra_ibd_df <- read.csv(intra_ibd_fname)
+            colnames(intra_ibd_df)[1] <- "aj_iid"
+            filtered_intra_ibd_df <- filter(intra_ibd_df, IBD_cM <= 20)
+            aj_pop_ibd_mt[row_country, col_country] <- mean(filtered_intra_ibd_df$IBD_cM)
+            next
+        }
+        ## symmetric, i.e. m[i,j]==m[j,i]
+        if (!is.na(aj_pop_ibd_mt[col_country, row_country])) {
+            aj_pop_ibd_mt[row_country, col_country] <- aj_pop_ibd_mt[col_country, row_country]
+            next
+        }
+        inter_ibd_fname <- paste("aj_pops_inter_IBD/", row_country, "AJ_IBD.csv", sep='')
+        inter_ibd_df <- read.csv(inter_ibd_fname)
+        inter_ibd_df <- pivot_longer(inter_ibd_df, cols=-1, names_to="pop1_iid", values_to="IBD_cM")
+        colnames(inter_ibd_df)[1] <- c("pop2_iid")
+        inter_ibd_df$pop1_iid <- gsub("^X", "", inter_ibd_df$pop1_iid)
+        ### Convert factor to character
+        inter_ibd_df$pop2_iid <- as.character(inter_ibd_df$pop2_iid)
+        inter_ibd_df$pop2 <- sapply(strsplit(inter_ibd_df$pop2_iid, split='__'), `[`, 1)
+        inter_ibd_df$pop2_iid <- sapply(strsplit(inter_ibd_df$pop2_iid, split='__'), `[`, 2)
+        filtered_inter_row_col_pops_df <- inter_ibd_df %>% filter(IBD_cM <= 20 & pop2==col_pop)
+        aj_pop_ibd_mt[row_country, col_country] <- mean(filtered_inter_row_col_pops_df$IBD_cM)
+    }
+}
+aj_pop_ibd_mt
+```
+
+<table>
+<thead><tr><th></th><th scope=col>Netherlands</th><th scope=col>Germany</th><th scope=col>Czechia</th><th scope=col>Latvia</th><th scope=col>Austria</th><th scope=col>Poland</th><th scope=col>Ukraine</th><th scope=col>Russia</th><th scope=col>Lithuania</th><th scope=col>Hungary</th><th scope=col>Romania</th><th scope=col>Belarus</th></tr></thead>
+<tbody>
+	<tr><th scope=row>Netherlands</th><td>7.387417</td><td>5.684752</td><td>5.614230</td><td>4.776921</td><td>5.740275</td><td>5.128309</td><td>5.662625</td><td>4.494057</td><td>4.658430</td><td>5.439302</td><td>5.788672</td><td>4.661666</td></tr>
+	<tr><th scope=row>Germany</th><td>5.684752</td><td>6.578104</td><td>6.367047</td><td>5.835891</td><td>5.433294</td><td>5.746501</td><td>5.916372</td><td>5.691315</td><td>5.988171</td><td>6.063730</td><td>5.914351</td><td>5.856119</td></tr>
+	<tr><th scope=row>Czechia</th><td>5.614230</td><td>6.367047</td><td>6.019122</td><td>5.448331</td><td>5.174700</td><td>5.530040</td><td>5.328873</td><td>5.406087</td><td>5.829266</td><td>5.601953</td><td>5.501878</td><td>5.643887</td></tr>
+	<tr><th scope=row>Latvia</th><td>4.776921</td><td>5.835891</td><td>5.448331</td><td>3.881938</td><td>5.865729</td><td>5.554047</td><td>5.303719</td><td>5.052756</td><td>4.835045</td><td>5.363957</td><td>4.796545</td><td>5.325558</td></tr>
+	<tr><th scope=row>Austria</th><td>5.740275</td><td>5.433294</td><td>5.174700</td><td>5.865729</td><td>6.705910</td><td>5.093223</td><td>5.489792</td><td>4.755418</td><td>5.527201</td><td>5.690068</td><td>5.322782</td><td>4.877118</td></tr>
+	<tr><th scope=row>Poland</th><td>5.128309</td><td>5.746501</td><td>5.530040</td><td>5.554047</td><td>5.093223</td><td>5.723591</td><td>5.661701</td><td>5.293543</td><td>5.644015</td><td>5.888033</td><td>5.730385</td><td>5.519930</td></tr>
+	<tr><th scope=row>Ukraine</th><td>5.662625</td><td>5.916372</td><td>5.328873</td><td>5.303719</td><td>5.489792</td><td>5.661701</td><td>5.806906</td><td>5.458133</td><td>5.588344</td><td>5.658569</td><td>5.743991</td><td>5.553848</td></tr>
+	<tr><th scope=row>Russia</th><td>4.494057</td><td>5.691315</td><td>5.406087</td><td>5.052756</td><td>4.755418</td><td>5.293543</td><td>5.458133</td><td>4.970164</td><td>5.433527</td><td>5.152243</td><td>5.147363</td><td>5.386329</td></tr>
+	<tr><th scope=row>Lithuania</th><td>4.658430</td><td>5.988171</td><td>5.829266</td><td>4.835045</td><td>5.527201</td><td>5.644015</td><td>5.588344</td><td>5.433527</td><td>5.679175</td><td>5.531684</td><td>5.805319</td><td>5.648732</td></tr>
+	<tr><th scope=row>Hungary</th><td>5.439302</td><td>6.063730</td><td>5.601953</td><td>5.363957</td><td>5.690068</td><td>5.888033</td><td>5.658569</td><td>5.152243</td><td>5.531684</td><td>5.498632</td><td>5.785865</td><td>5.545408</td></tr>
+	<tr><th scope=row>Romania</th><td>5.788672</td><td>5.914351</td><td>5.501878</td><td>4.796545</td><td>5.322782</td><td>5.730385</td><td>5.743991</td><td>5.147363</td><td>5.805319</td><td>5.785865</td><td>5.715780</td><td>4.810018</td></tr>
+	<tr><th scope=row>Belarus</th><td>4.661666</td><td>5.856119</td><td>5.643887</td><td>5.325558</td><td>4.877118</td><td>5.519930</td><td>5.553848</td><td>5.386329</td><td>5.648732</td><td>5.545408</td><td>4.810018</td><td>5.070845</td></tr>
+</tbody>
+</table>
+
+```R
+dend_pops <- aj_pop_ibd_mt %>% dist %>% 
+   hclust(method="ward.D2") %>% as.dendrogram %>% color_branches(k=1)
+
+color_func <- colorspace::sequential_hcl(25, "Inferno") # Or "Reds" or "Inferno" ?
+
+labels_color <- c('black', rep('purple', 2), 'red', 'darkblue', rep('purple', 2), 'red',
+                 rep('purple', 3), 'red')
+
+gplots::heatmap.2(as.matrix(aj_pop_ibd_mt), 
+          main = NA,
+          srtCol = 30,
+          dendrogram = "both",
+          Rowv = rev(dend_pops),
+          Colv = dend_pops,
+          trace="none",          
+          margins =c(5, 9), 
+          key.xlab = "Mean pairwise IBD (cM)",
+          labCol = all_aj_countries_with_size,
+          labRow = all_aj_countries_with_size,
+          colRow = labels_color,
+          colCol = labels_color,
+          denscol = "grey",
+          density.info = "density",
+          col = rev(color_func))
+```
+
+
+![png](README_files/README_28_0.png)
+
+
+
+<a name="nj-ibd"></a>
+### Subsequently, let's read all 75 NJ populations of interest and report their inter-group mean pairwise total IBD length to a matrix, thus we should report every individual pair that share more than $nj_merging_ibd_thres cM
+
+```R
+nj_merging_ibd_thres
+nj_pops_list_df <- read.csv("76pop_non_jews_id_file_list.txt", sep="/", head=FALSE)
+nj_pops_list_df <- nj_pops_list_df %>% filter(!V3=="Romani.id")
+nj_pops_list <- nj_pops_list_df$V3 %>% str_replace("\\.id", "") 
+nj_pops_list %>% length
+```
+
+
+5.46616644099318
+
+
+
+75
+
+
+
+```R
+all_nj_pops_ibd_mt <- data.frame(matrix(, ncol = length(nj_pops_list), nrow = length(nj_pops_list)))
+colnames(all_nj_pops_ibd_mt) <- nj_pops_list
+rownames(all_nj_pops_ibd_mt) <- nj_pops_list
+nj_pops_list_N <- c()
+
+for (row_pop in nj_pops_list){
+    for (col_pop in nj_pops_list){
+        if (row_pop == col_pop) {
+            filtered_intra_ibd_df <- get_nj_intra_ibd_df(row_pop)
+            all_nj_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_intra_ibd_df$IBD_cM)
+            row_pop_N <- c(filtered_intra_ibd_df$pop1_iid, filtered_intra_ibd_df$pop2_iid) %>% unique %>% length
+            new_row_pop <- gsub("Turkish_", "Turk_", row_pop)
+            row_pop_N_str <- paste(new_row_pop, " (N=", row_pop_N, ")", sep="")
+            nj_pops_list_N <- c(nj_pops_list_N, row_pop_N_str)
+            filtered_intra_ibd_df <- NA
+            next
+        }
+        ## symmetric, i.e. m[i,j]==m[j,i]
+        if (!is.na(all_nj_pops_ibd_mt[col_pop, row_pop])) {
+            all_nj_pops_ibd_mt[row_pop, col_pop] <- all_nj_pops_ibd_mt[col_pop, row_pop]
+            next
+        }
+        filtered_inter_row_col_pops_df <- get_nj_inter_df(row_pop, col_pop)
+        all_nj_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_inter_row_col_pops_df$IBD_cM)
+        filtered_inter_row_col_pops_df <- NA
+    }
+}
+all_nj_pops_ibd_mt  %>% dim
+```
+
+
+<ol class=list-inline>
+	<li>75</li>
+	<li>75</li>
+</ol>
+
+
+
+
+```R
+close_pairs_colname <- c("pop1", 'pop2', "N_pop1", "N_pop2", "IBD_cM")
+close_ibd_pairs_df <- data.frame(matrix(, ncol=length(close_pairs_colname), nrow = 0))
+colnames(close_ibd_pairs_df) <- close_pairs_colname
+
+for (i in 1:nrow(all_nj_pops_ibd_mt)) {
+    for (j in 1:ncol(all_nj_pops_ibd_mt)) {
+        if (j==i) next
+        if (all_nj_pops_ibd_mt[i, j] >= nj_merging_ibd_thres) {
+            new_row <- c(nj_pops_list[i], nj_pops_list[j], parse_number(nj_pops_list_N[i]), 
+                        parse_number(nj_pops_list_N[j]), all_nj_pops_ibd_mt[i, j])
+            close_ibd_pairs_df[nrow(close_ibd_pairs_df)+1, ] <- new_row            
+        }
+    }
+}
+eligible_nj_pops <- close_ibd_pairs_df$pop1 %>% unique
+closest_ibd_pairs_df <- close_ibd_pairs_df %>% group_by(pop1) %>% top_n(3, IBD_cM)
+closest_ibd_pairs_df <- closest_ibd_pairs_df[rev(order(closest_ibd_pairs_df$IBD_cM)), ]
+write.csv(closest_ibd_pairs_df, "../closest_nj_pairs.csv", row.names=FALSE)
+```
+
+
+
+
+### With regards to both geographic locations and population pairwise IBD, I would like to merge the following populations in HClust plots:
+
+
+```R
+## First element is the merged nme, whereas the following elements
+nj_merge_list <- list(
+    c("NorthAfrican_west", "Libyan", "Moroccan", "Tunisian", "Algerian"),
+    c("Italian_central_south", "Tuscan", "Italian_south"),
+    c("Brit", "Scottish", "English"),
+    c("Romanian-Moldavian", "Romanian", "Moldavian"),
+    c("Swede-Norwegian-German", "Swede", "Norwegian", "German"),
+    c("Lithuanian-Latvian", "Lithuanian", "Latvian"),
+    c("Saudi-Bedouin", "Saudi", "Bedouin"),
+    c("Finn-Estonian", "Finnish", "Estonian"),
+    c("Caucasian_northeast", "Chechen", "Ingushian", "Avar", "Darginian"),
+    c("Basque-Spanish_north", "Basque", "Spanish_north"),
+    c("Turk_northeast", "Turkish_northeast", "Armenian_Hemsheni"),
+    c("Turkmen-Uzbek", "Turkmen", "Uzbek"),
+    c("Pole-Ukrainian_north", "Polish", "Ukrainian_north"),
+    c("Lebanese", "Lebanese_Muslim", "Lebanese_Christian", "Lebanese_unknown"),
+    c("Chuvash-Tatar_Volga", "Chuvash", "Tatar_Kazan", "Tatar_Volga"),
+    c("Palestinian-Jordanian", "Palestinian", "Jordanian")
+)
+```
+
+
+```R
+nj_pops_to_merge <- c()
+nj_merged_new_pops <- c()
+for (merged_pairs in nj_merge_list) {
+    nj_merged_new_pops <- c(nj_merged_new_pops, merged_pairs[1])
+    nj_pops_to_merge <- c(nj_pops_to_merge, merged_pairs[-1])
+}
+nj_pops_to_merge %>% length
+nj_merge_list %>% length 
+nj_merged_new_pops
+```
+
+
+39
+
+
+
+16
+
+
+
+<ol class=list-inline>
+	<li>'NorthAfrican_west'</li>
+	<li>'Italian_central_south'</li>
+	<li>'Brit'</li>
+	<li>'Romanian-Moldavian'</li>
+	<li>'Swede-Norwegian-German'</li>
+	<li>'Lithuanian-Latvian'</li>
+	<li>'Saudi-Bedouin'</li>
+	<li>'Finn-Estonian'</li>
+	<li>'Caucasian_northeast'</li>
+	<li>'Basque-Spanish_north'</li>
+	<li>'Turk_northeast'</li>
+	<li>'Turkmen-Uzbek'</li>
+	<li>'Pole-Ukrainian_north'</li>
+	<li>'Lebanese'</li>
+	<li>'Chuvash-Tatar_Volga'</li>
+	<li>'Palestinian-Jordanian'</li>
+</ol>
+
+
+
+### Therefore, 75 population pairs were reduced to 52 groups. Therefore, we would have 52 non-Jewish populations to demonstrate in HClust plot
+
+
+```R
+updated_nj_pops <- c()
+updated_nj_pops <- c(nj_pops_list[!nj_pops_list %in% nj_pops_to_merge], nj_merged_new_pops)
+updated_nj_pops %>% length
+updated_nj_pops_ibd_mt <- data.frame(matrix(, ncol = length(updated_nj_pops), nrow = length(updated_nj_pops)))
+colnames(updated_nj_pops_ibd_mt) <- updated_nj_pops
+rownames(updated_nj_pops_ibd_mt) <- updated_nj_pops
+updated_nj_pops_N <- c()
+```
+
+
+52
+
+
+
+```R
+get_merged_pop_intra_ibd <- function (merged_pops) {
+    pop_N <- length(merged_pops)
+    ibd_df_colnames <- c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")
+    merged_ibd_df <- data.frame(matrix(, ncol = length(ibd_df_colnames), nrow = 0))
+    colnames(merged_ibd_df) <- ibd_df_colnames
+    merged_ibd_df$pop1 <- merged_ibd_df$pop1 %>% as.character
+    merged_ibd_df$pop2 <- merged_ibd_df$pop2 %>% as.character
+    merged_ibd_df$pop1_iid <- merged_ibd_df$pop1_iid %>% as.character
+    merged_ibd_df$pop2_iid <- merged_ibd_df$pop2_iid %>% as.character
+    merged_ibd_df$IBD_cM <- merged_ibd_df$IBD_cM %>% as.numeric
+    for (i in 1:pop_N) {
+        for (j in i:pop_N) {
+            if (i==j) {
+                merged_ibd_df <- bind_rows(merged_ibd_df, get_nj_intra_ibd_df(merged_pops[i]))
+                next
+            }
+            merged_ibd_df <- bind_rows(merged_ibd_df, get_nj_inter_df(merged_pops[i], merged_pops[j]))
+        }
+    }
+    return(merged_ibd_df)
+}
+```
+
+
+```R
+get_merged_pops_inter_ibd <- function (merged_pops1, merged_pops2) {
+    ibd_df_colnames <- c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")
+    merged_ibd_df <- data.frame(matrix(, ncol = length(ibd_df_colnames), nrow = 0))
+    colnames(merged_ibd_df) <- ibd_df_colnames
+    merged_ibd_df$pop1 <- merged_ibd_df$pop1 %>% as.character
+    merged_ibd_df$pop2 <- merged_ibd_df$pop2 %>% as.character
+    merged_ibd_df$pop1_iid <- merged_ibd_df$pop1_iid %>% as.character
+    merged_ibd_df$pop2_iid <- merged_ibd_df$pop2_iid %>% as.character
+    merged_ibd_df$IBD_cM <- merged_ibd_df$IBD_cM %>% as.numeric
+    for (pop1 in merged_pops1) {
+        for (pop2 in merged_pops2) {
+            merged_ibd_df <- bind_rows(merged_ibd_df, get_nj_inter_df(pop1, pop2))
+        }
+    }
+    return(merged_ibd_df)                           
+}
+```
+
+
+```R
+for (row_pop in updated_nj_pops){
+    for (col_pop in updated_nj_pops){
+      ## symmetric, i.e. m[i,j]==m[j,i]
+      if (!is.na(updated_nj_pops_ibd_mt[col_pop, row_pop])) {
+          updated_nj_pops_ibd_mt[row_pop, col_pop] <- updated_nj_pops_ibd_mt[col_pop, row_pop]
+          next
+      }
+      ## if both populations are not concatenated
+      if (!row_pop %in% nj_merged_new_pops && !col_pop %in% nj_merged_new_pops) {
+        if (row_pop == col_pop) {
+            filtered_intra_ibd_df <- get_nj_intra_ibd_df(row_pop)
+            updated_nj_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_intra_ibd_df$IBD_cM)
+            row_pop_N <- c(filtered_intra_ibd_df$pop1_iid, filtered_intra_ibd_df$pop2_iid) %>% unique %>% length
+            new_row_pop <- gsub("Turkish_", "Turk_", row_pop)
+            row_pop_N_str <- paste(new_row_pop, " (N=", row_pop_N, ")", sep="")
+            updated_nj_pops_N <- c(updated_nj_pops_N, row_pop_N_str)
+            filtered_intra_ibd_df <- NA
+            next
+        }
+        filtered_inter_row_col_pops_df <- get_nj_inter_df(row_pop, col_pop)
+        updated_nj_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_inter_row_col_pops_df$IBD_cM)
+        filtered_inter_row_col_pops_df <- NA
+      }
+      ## Since all concatenated populations(13 in total) are at the end of $updated_nj_pops,
+      ### we would only have non-concatenated $row_pop and concatenated $col_pop
+      else if (!row_pop %in% nj_merged_new_pops && col_pop %in% nj_merged_new_pops) {
+          col_pops <- nj_merge_list[[which(nj_merged_new_pops==col_pop)]][-1]
+          ibd_df_colnames <- c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")
+          merged_ibd_df <- data.frame(matrix(, ncol = length(ibd_df_colnames), nrow = 0))
+          colnames(merged_ibd_df) <- ibd_df_colnames
+          merged_ibd_df$pop1 <- merged_ibd_df$pop1 %>% as.character
+          merged_ibd_df$pop2 <- merged_ibd_df$pop2 %>% as.character
+          merged_ibd_df$pop1_iid <- merged_ibd_df$pop1_iid %>% as.character
+          merged_ibd_df$pop2_iid <- merged_ibd_df$pop2_iid %>% as.character
+          merged_ibd_df$IBD_cM <- merged_ibd_df$IBD_cM %>% as.numeric
+          for (pop in col_pops) {
+              merged_ibd_df <- bind_rows(merged_ibd_df, get_nj_inter_df(row_pop, pop))
+          }
+          updated_nj_pops_ibd_mt[row_pop, col_pop] <- mean(merged_ibd_df$IBD_cM)
+          merged_ibd_df <- NA
+      }
+      ## if both populations are concatenated
+      else if (row_pop %in% nj_merged_new_pops && col_pop %in% nj_merged_new_pops) {
+          ## if at the diagonal line
+          if (row_pop==col_pop) {
+            row_pops <- nj_merge_list[[which(nj_merged_new_pops==row_pop)]][-1]
+            filtered_intra_ibd_df <- get_merged_pop_intra_ibd(row_pops)
+            updated_nj_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_intra_ibd_df$IBD_cM)
+            concat_iids <- c(filtered_intra_ibd_df$pop1_iid, filtered_intra_ibd_df$pop2_iid)
+            row_pop_N <- concat_iids %>% str_replace_all("\\.", "\\-") %>% unique %>% length
+            new_row_pop <- gsub("Turkish_", "Turk_", row_pop)
+            row_pop_N_str <- paste(new_row_pop, " (N=", row_pop_N, ")", sep="")
+            updated_nj_pops_N <- c(updated_nj_pops_N, row_pop_N_str)
+            filtered_intra_ibd_df <- NA
+            next
+          }
+          ## if not at the diagional line
+          row_pops <- nj_merge_list[[which(nj_merged_new_pops==row_pop)]][-1]
+          col_pops <- nj_merge_list[[which(nj_merged_new_pops==col_pop)]][-1]
+          filtered_inter_row_col_pops_ibd_df <- get_merged_pops_inter_ibd(row_pops, col_pops)
+          updated_nj_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_inter_row_col_pops_ibd_df$IBD_cM)
+          filtered_inter_row_col_pops_ibd_df <- NA
+      }
+    }
+}
+updated_nj_pops_ibd_mt %>% dim
+updated_nj_pops_ibd_mt
+```
+
+
+<ol class=list-inline>
+	<li>52</li>
+	<li>52</li>
+</ol>
+
+
+
+
+<table>
+<thead><tr><th></th><th scope=col>Adygei</th><th scope=col>Albanian</th><th scope=col>Armenian</th><th scope=col>Assyrian</th><th scope=col>Azeri</th><th scope=col>Bashkir</th><th scope=col>Belarusian</th><th scope=col>Bulgarian</th><th scope=col>Croatian</th><th scope=col>Czech</th><th scope=col>...</th><th scope=col>Saudi-Bedouin</th><th scope=col>Finn-Estonian</th><th scope=col>Caucasian_northeast</th><th scope=col>Basque-Spanish_north</th><th scope=col>Turk_northeast</th><th scope=col>Turkmen-Uzbek</th><th scope=col>Pole-Ukrainian_north</th><th scope=col>Lebanese</th><th scope=col>Chuvash-Tatar_Volga</th><th scope=col>Palestinian-Jordanian</th></tr></thead>
+<tbody>
+	<tr><th scope=row>Adygei</th><td>4.445023</td><td>3.604988</td><td>3.569203</td><td>3.617093</td><td>3.311366</td><td>2.709129</td><td>3.797104</td><td>4.276506</td><td>3.457908</td><td>3.751406</td><td>...     </td><td>2.823914</td><td>3.614387</td><td>3.567321</td><td>3.827562</td><td>3.922625</td><td>2.652671</td><td>3.633420</td><td>3.310842</td><td>3.269239</td><td>3.042230</td></tr>
+	<tr><th scope=row>Albanian</th><td>3.604988</td><td>5.471540</td><td>3.264654</td><td>3.140239</td><td>3.497129</td><td>3.137327</td><td>4.575962</td><td>5.572480</td><td>3.817907</td><td>4.719590</td><td>...     </td><td>2.885202</td><td>4.575499</td><td>4.040610</td><td>3.868057</td><td>4.637490</td><td>2.268164</td><td>4.517542</td><td>3.500798</td><td>3.481588</td><td>3.084774</td></tr>
+	<tr><th scope=row>Armenian</th><td>3.569203</td><td>3.264654</td><td>3.583862</td><td>2.979043</td><td>3.335305</td><td>2.355132</td><td>4.019158</td><td>3.952565</td><td>3.270565</td><td>3.919115</td><td>...     </td><td>2.612489</td><td>2.765608</td><td>3.428114</td><td>3.776191</td><td>4.028971</td><td>2.501345</td><td>3.005249</td><td>3.496043</td><td>3.113089</td><td>3.252860</td></tr>
+	<tr><th scope=row>Assyrian</th><td>3.617093</td><td>3.140239</td><td>2.979043</td><td>3.268451</td><td>3.148950</td><td>2.358013</td><td>2.934419</td><td>3.838591</td><td>3.351227</td><td>2.878914</td><td>...     </td><td>2.546968</td><td>3.039932</td><td>2.997220</td><td>3.342695</td><td>3.436756</td><td>2.120618</td><td>2.969194</td><td>2.578746</td><td>2.808711</td><td>3.003396</td></tr>
+	<tr><th scope=row>Azeri</th><td>3.311366</td><td>3.497129</td><td>3.335305</td><td>3.148950</td><td>3.470841</td><td>2.629797</td><td>3.057577</td><td>3.902485</td><td>3.143917</td><td>3.127180</td><td>...     </td><td>2.613394</td><td>3.163119</td><td>3.248957</td><td>3.264755</td><td>3.452253</td><td>2.249355</td><td>3.178089</td><td>2.899116</td><td>3.205130</td><td>2.981461</td></tr>
+	<tr><th scope=row>Bashkir</th><td>2.709129</td><td>3.137327</td><td>2.355132</td><td>2.358013</td><td>2.629797</td><td>3.398851</td><td>3.378572</td><td>3.591292</td><td>3.305128</td><td>3.299418</td><td>...     </td><td>1.925055</td><td>3.269460</td><td>2.544630</td><td>3.151597</td><td>2.696523</td><td>2.577885</td><td>3.100921</td><td>2.325768</td><td>3.404594</td><td>2.229964</td></tr>
+	<tr><th scope=row>Belarusian</th><td>3.797104</td><td>4.575962</td><td>4.019158</td><td>2.934419</td><td>3.057577</td><td>3.378572</td><td>6.504368</td><td>5.817239</td><td>4.948746</td><td>4.505456</td><td>...     </td><td>3.246662</td><td>4.945608</td><td>3.587435</td><td>4.512812</td><td>3.393683</td><td>2.902093</td><td>4.790434</td><td>3.268474</td><td>4.145539</td><td>3.089325</td></tr>
+	<tr><th scope=row>Bulgarian</th><td>4.276506</td><td>5.572480</td><td>3.952565</td><td>3.838591</td><td>3.902485</td><td>3.591292</td><td>5.817239</td><td>5.317502</td><td>5.080481</td><td>5.223447</td><td>...     </td><td>2.879492</td><td>4.827026</td><td>4.274951</td><td>5.089133</td><td>4.799221</td><td>2.911683</td><td>4.522266</td><td>3.775594</td><td>4.373094</td><td>3.836185</td></tr>
+	<tr><th scope=row>Croatian</th><td>3.457908</td><td>3.817907</td><td>3.270565</td><td>3.351227</td><td>3.143917</td><td>3.305128</td><td>4.948746</td><td>5.080481</td><td>4.016553</td><td>3.902365</td><td>...     </td><td>2.824911</td><td>3.728493</td><td>3.320404</td><td>4.362276</td><td>3.637298</td><td>2.450149</td><td>4.125276</td><td>3.457325</td><td>3.949356</td><td>2.941913</td></tr>
+	<tr><th scope=row>Czech</th><td>3.751406</td><td>4.719590</td><td>3.919115</td><td>2.878914</td><td>3.127180</td><td>3.299418</td><td>4.505456</td><td>5.223447</td><td>3.902365</td><td>4.168555</td><td>...     </td><td>2.613697</td><td>4.764230</td><td>3.445311</td><td>4.775463</td><td>3.487457</td><td>2.161759</td><td>4.225695</td><td>3.044348</td><td>4.171809</td><td>2.977554</td></tr>
+	<tr><th scope=row>Druze</th><td>3.602801</td><td>3.780956</td><td>3.556264</td><td>3.401573</td><td>3.610356</td><td>2.507629</td><td>3.516694</td><td>3.745152</td><td>3.308612</td><td>3.507013</td><td>...     </td><td>2.757963</td><td>3.427340</td><td>3.201921</td><td>3.409645</td><td>3.837274</td><td>2.406190</td><td>3.069017</td><td>3.345886</td><td>2.877479</td><td>3.099290</td></tr>
+	<tr><th scope=row>Egyptian</th><td>2.378430</td><td>2.661141</td><td>2.660641</td><td>2.219209</td><td>2.153996</td><td>1.640101</td><td>2.151192</td><td>3.121246</td><td>2.468427</td><td>2.840125</td><td>...     </td><td>2.259354</td><td>2.206818</td><td>2.210128</td><td>2.745741</td><td>2.987387</td><td>1.508634</td><td>2.418025</td><td>2.476235</td><td>1.971977</td><td>2.325258</td></tr>
+	<tr><th scope=row>French</th><td>3.732266</td><td>4.415453</td><td>3.824439</td><td>3.517887</td><td>3.534048</td><td>3.108858</td><td>4.645068</td><td>4.931242</td><td>4.493636</td><td>4.580070</td><td>...     </td><td>2.749350</td><td>4.641496</td><td>3.597354</td><td>4.584697</td><td>3.832942</td><td>2.522926</td><td>4.283498</td><td>3.359992</td><td>3.788508</td><td>3.240673</td></tr>
+	<tr><th scope=row>French_south</th><td>4.087907</td><td>3.751531</td><td>3.872951</td><td>3.244058</td><td>3.698059</td><td>2.893251</td><td>4.766959</td><td>4.924350</td><td>5.721293</td><td>4.354946</td><td>...     </td><td>2.956895</td><td>4.960668</td><td>3.504449</td><td>5.031885</td><td>3.662568</td><td>2.568611</td><td>4.015370</td><td>3.459609</td><td>3.708366</td><td>3.085779</td></tr>
+	<tr><th scope=row>Georgian</th><td>3.907829</td><td>4.113116</td><td>3.614735</td><td>3.198126</td><td>3.550292</td><td>2.723390</td><td>3.912817</td><td>4.517330</td><td>3.988438</td><td>3.519515</td><td>...     </td><td>2.812242</td><td>3.387050</td><td>3.313804</td><td>3.802879</td><td>4.060197</td><td>2.567823</td><td>3.545730</td><td>3.361910</td><td>3.152259</td><td>3.049960</td></tr>
+	<tr><th scope=row>Greek</th><td>3.698018</td><td>4.313048</td><td>3.776362</td><td>3.466373</td><td>3.358264</td><td>2.951364</td><td>4.248287</td><td>4.650799</td><td>4.064132</td><td>3.989087</td><td>...     </td><td>2.787446</td><td>3.830226</td><td>3.631350</td><td>4.284907</td><td>4.142388</td><td>2.575030</td><td>4.079727</td><td>3.337312</td><td>3.545090</td><td>3.084381</td></tr>
+	<tr><th scope=row>Hungarian</th><td>3.470392</td><td>4.532398</td><td>3.868998</td><td>3.374795</td><td>3.510475</td><td>3.225712</td><td>4.792115</td><td>5.281967</td><td>4.687423</td><td>4.890492</td><td>...     </td><td>2.637832</td><td>4.527633</td><td>3.777091</td><td>4.296765</td><td>4.104029</td><td>2.581265</td><td>4.593208</td><td>3.188257</td><td>4.175267</td><td>3.212243</td></tr>
+	<tr><th scope=row>Icelandic</th><td>3.889059</td><td>4.698914</td><td>3.760762</td><td>3.516671</td><td>3.582933</td><td>3.325455</td><td>5.212161</td><td>4.875118</td><td>5.412558</td><td>4.778267</td><td>...     </td><td>3.067290</td><td>4.745093</td><td>3.651085</td><td>4.866790</td><td>3.955871</td><td>2.933679</td><td>4.542870</td><td>3.412485</td><td>4.085153</td><td>3.027714</td></tr>
+	<tr><th scope=row>Iranian_gulf</th><td>2.938906</td><td>3.667133</td><td>3.209600</td><td>2.834391</td><td>2.807479</td><td>2.279006</td><td>3.511630</td><td>2.701940</td><td>3.158352</td><td>2.580206</td><td>...     </td><td>2.204420</td><td>2.719744</td><td>2.879563</td><td>3.110445</td><td>2.518298</td><td>1.966213</td><td>2.986380</td><td>2.752750</td><td>2.737945</td><td>2.781403</td></tr>
+	<tr><th scope=row>Iranian</th><td>3.485387</td><td>3.185566</td><td>3.017620</td><td>2.814488</td><td>3.259524</td><td>2.466089</td><td>3.104244</td><td>3.758158</td><td>3.183514</td><td>3.209132</td><td>...     </td><td>2.571438</td><td>2.991384</td><td>3.323599</td><td>3.292248</td><td>3.718259</td><td>2.526992</td><td>3.039699</td><td>2.969432</td><td>3.011015</td><td>2.968373</td></tr>
+	<tr><th scope=row>Italian_north</th><td>4.184033</td><td>4.604661</td><td>4.241955</td><td>3.256904</td><td>3.597501</td><td>3.065659</td><td>4.512426</td><td>4.924363</td><td>4.935541</td><td>4.428267</td><td>...     </td><td>3.020715</td><td>4.235133</td><td>3.488657</td><td>4.841245</td><td>4.537425</td><td>2.781012</td><td>4.278312</td><td>3.631247</td><td>3.995616</td><td>3.540791</td></tr>
+	<tr><th scope=row>Kurd</th><td>3.035238</td><td>3.478397</td><td>3.450662</td><td>2.500177</td><td>3.024303</td><td>2.129046</td><td>2.790389</td><td>4.134605</td><td>2.554140</td><td>3.102828</td><td>...     </td><td>2.523391</td><td>2.815579</td><td>2.635530</td><td>3.189008</td><td>2.994760</td><td>1.830688</td><td>2.857940</td><td>2.961168</td><td>2.600560</td><td>2.723066</td></tr>
+	<tr><th scope=row>Maltese</th><td>3.390485</td><td>3.928644</td><td>3.377488</td><td>3.486955</td><td>3.345893</td><td>2.611809</td><td>3.429494</td><td>4.784409</td><td>3.073306</td><td>3.530154</td><td>...     </td><td>2.674826</td><td>3.527263</td><td>3.165011</td><td>3.977358</td><td>3.622537</td><td>2.407085</td><td>3.863056</td><td>3.196228</td><td>3.347106</td><td>2.988969</td></tr>
+	<tr><th scope=row>Mordovian</th><td>3.708945</td><td>4.170683</td><td>3.024179</td><td>2.776685</td><td>3.234888</td><td>3.609812</td><td>5.075922</td><td>4.425619</td><td>4.628617</td><td>4.406861</td><td>...     </td><td>2.477476</td><td>4.493400</td><td>3.443533</td><td>4.183244</td><td>3.875241</td><td>2.562764</td><td>4.028867</td><td>3.060146</td><td>4.122899</td><td>2.831956</td></tr>
+	<tr><th scope=row>Pathan</th><td>2.802505</td><td>2.484819</td><td>2.710897</td><td>2.780874</td><td>2.205564</td><td>2.327030</td><td>2.970169</td><td>2.918989</td><td>2.435641</td><td>2.543238</td><td>...     </td><td>1.644341</td><td>2.735797</td><td>2.646299</td><td>2.550336</td><td>2.824577</td><td>2.134891</td><td>2.458862</td><td>2.031262</td><td>2.690757</td><td>2.377361</td></tr>
+	<tr><th scope=row>Russian</th><td>3.802737</td><td>4.045176</td><td>3.463601</td><td>3.010009</td><td>3.147795</td><td>3.395149</td><td>5.286079</td><td>4.823925</td><td>4.582685</td><td>4.447496</td><td>...     </td><td>2.541922</td><td>4.614048</td><td>3.622220</td><td>4.304924</td><td>3.645546</td><td>2.607792</td><td>4.549791</td><td>2.997586</td><td>3.997478</td><td>2.961122</td></tr>
+	<tr><th scope=row>Russian_nordic</th><td>3.133604</td><td>3.464611</td><td>2.907071</td><td>2.928339</td><td>2.824725</td><td>3.205404</td><td>5.013758</td><td>4.210985</td><td>4.161415</td><td>4.094348</td><td>...     </td><td>2.511424</td><td>4.421129</td><td>3.373668</td><td>3.632042</td><td>2.955330</td><td>2.412077</td><td>3.628734</td><td>2.746265</td><td>4.418582</td><td>2.551950</td></tr>
+	<tr><th scope=row>Sardinian</th><td>3.673550</td><td>4.442630</td><td>3.302281</td><td>3.589884</td><td>3.083420</td><td>2.646838</td><td>4.555195</td><td>4.909218</td><td>4.248244</td><td>3.963503</td><td>...     </td><td>3.029565</td><td>4.177673</td><td>3.303308</td><td>4.557983</td><td>4.128067</td><td>2.241739</td><td>4.086758</td><td>3.462268</td><td>3.579522</td><td>3.497064</td></tr>
+	<tr><th scope=row>Spanish</th><td>3.690784</td><td>4.141229</td><td>3.610742</td><td>3.237909</td><td>3.263062</td><td>2.943330</td><td>4.169065</td><td>4.331537</td><td>4.241049</td><td>4.284732</td><td>...     </td><td>2.780183</td><td>4.036697</td><td>3.409249</td><td>4.742067</td><td>3.699817</td><td>2.510941</td><td>3.945322</td><td>3.325695</td><td>3.665652</td><td>3.258188</td></tr>
+	<tr><th scope=row>Syrian</th><td>2.793150</td><td>3.134958</td><td>3.610871</td><td>2.767506</td><td>2.609451</td><td>2.214401</td><td>2.588617</td><td>3.484870</td><td>3.633919</td><td>3.130397</td><td>...     </td><td>2.673520</td><td>3.202058</td><td>2.800129</td><td>3.189282</td><td>3.113610</td><td>2.383187</td><td>3.039013</td><td>2.949836</td><td>2.589748</td><td>2.778531</td></tr>
+	<tr><th scope=row>Tatar_Siberian</th><td>2.424671</td><td>2.542010</td><td>2.457111</td><td>2.005066</td><td>2.681278</td><td>2.951161</td><td>2.824822</td><td>3.169040</td><td>2.845946</td><td>2.397067</td><td>...     </td><td>1.699967</td><td>2.958975</td><td>2.461504</td><td>2.755975</td><td>2.448149</td><td>2.565780</td><td>2.621731</td><td>2.101675</td><td>2.979875</td><td>1.853227</td></tr>
+	<tr><th scope=row>Turkish_central</th><td>3.598802</td><td>3.587802</td><td>3.432922</td><td>3.093205</td><td>2.806410</td><td>2.712222</td><td>4.250178</td><td>4.312208</td><td>4.003179</td><td>3.115423</td><td>...     </td><td>2.771078</td><td>3.074388</td><td>3.402155</td><td>3.538990</td><td>4.072143</td><td>2.912087</td><td>3.193301</td><td>3.439280</td><td>3.068415</td><td>2.969034</td></tr>
+	<tr><th scope=row>Turkish_mixed</th><td>3.320603</td><td>3.840548</td><td>3.391912</td><td>3.243052</td><td>2.959802</td><td>2.649367</td><td>3.846038</td><td>4.052459</td><td>3.371843</td><td>3.595820</td><td>...     </td><td>2.709987</td><td>3.297668</td><td>3.593924</td><td>3.648497</td><td>3.548403</td><td>2.793069</td><td>3.593884</td><td>3.130997</td><td>3.433459</td><td>3.198755</td></tr>
+	<tr><th scope=row>Turkish_south</th><td>3.376160</td><td>3.635222</td><td>3.203066</td><td>2.823735</td><td>3.184216</td><td>2.630294</td><td>3.764202</td><td>4.571296</td><td>3.262760</td><td>3.661112</td><td>...     </td><td>2.711156</td><td>3.249719</td><td>3.486633</td><td>3.079971</td><td>3.707407</td><td>2.822943</td><td>3.339600</td><td>3.052498</td><td>3.092706</td><td>3.140253</td></tr>
+	<tr><th scope=row>Turkish_west</th><td>3.344499</td><td>3.494911</td><td>3.070973</td><td>3.259400</td><td>3.308230</td><td>2.854685</td><td>3.640637</td><td>3.947882</td><td>4.022877</td><td>3.833124</td><td>...     </td><td>2.632735</td><td>3.536950</td><td>3.392921</td><td>3.967744</td><td>3.451201</td><td>2.601894</td><td>3.263744</td><td>3.212919</td><td>3.206385</td><td>3.390407</td></tr>
+	<tr><th scope=row>Ukrainian</th><td>4.020619</td><td>4.726219</td><td>3.572074</td><td>3.027625</td><td>2.914533</td><td>3.457440</td><td>4.893502</td><td>5.197489</td><td>4.439569</td><td>4.431882</td><td>...     </td><td>2.563019</td><td>4.490588</td><td>3.869377</td><td>4.380440</td><td>4.139244</td><td>2.697169</td><td>4.331557</td><td>3.019674</td><td>4.494400</td><td>3.021465</td></tr>
+	<tr><th scope=row>NorthAfrican_west</th><td>2.074748</td><td>2.093728</td><td>2.050965</td><td>2.024596</td><td>1.997029</td><td>1.424484</td><td>2.066905</td><td>2.082422</td><td>2.190823</td><td>2.562630</td><td>...     </td><td>1.772283</td><td>2.094553</td><td>1.726684</td><td>2.018233</td><td>2.197203</td><td>1.390016</td><td>1.881166</td><td>1.883048</td><td>1.907099</td><td>1.948209</td></tr>
+	<tr><th scope=row>Italian_central_south</th><td>3.630670</td><td>5.496334</td><td>4.177327</td><td>3.513252</td><td>3.761544</td><td>3.111697</td><td>4.632615</td><td>5.269104</td><td>4.448329</td><td>4.683548</td><td>...     </td><td>3.251148</td><td>4.085664</td><td>3.866795</td><td>4.844278</td><td>4.250370</td><td>2.704636</td><td>4.612478</td><td>3.678997</td><td>3.813101</td><td>3.332770</td></tr>
+	<tr><th scope=row>Brit</th><td>3.706690</td><td>5.549817</td><td>3.679047</td><td>3.350500</td><td>3.611929</td><td>3.170325</td><td>4.698348</td><td>5.559332</td><td>5.377974</td><td>4.624164</td><td>...     </td><td>2.835298</td><td>4.273824</td><td>3.865784</td><td>4.995817</td><td>3.828127</td><td>2.784548</td><td>4.317800</td><td>3.270308</td><td>4.159678</td><td>2.880595</td></tr>
+	<tr><th scope=row>Romanian-Moldavian</th><td>3.782062</td><td>4.746650</td><td>3.641624</td><td>3.808301</td><td>3.049605</td><td>3.209105</td><td>4.938538</td><td>5.099741</td><td>5.260989</td><td>4.622326</td><td>...     </td><td>2.965645</td><td>4.605714</td><td>3.785861</td><td>4.261205</td><td>4.208111</td><td>2.852206</td><td>4.234821</td><td>3.370431</td><td>3.824312</td><td>3.477083</td></tr>
+	<tr><th scope=row>Swede-Norwegian-German</th><td>3.093389</td><td>3.930319</td><td>3.330245</td><td>3.121181</td><td>3.093580</td><td>3.106175</td><td>4.527285</td><td>5.027459</td><td>4.750388</td><td>4.629672</td><td>...     </td><td>2.702436</td><td>4.090208</td><td>3.483749</td><td>4.305821</td><td>3.427323</td><td>2.573578</td><td>4.196042</td><td>2.913281</td><td>3.947068</td><td>2.840731</td></tr>
+	<tr><th scope=row>Lithuanian-Latvian</th><td>3.480092</td><td>4.588597</td><td>3.573327</td><td>3.388778</td><td>3.334935</td><td>3.193446</td><td>5.033905</td><td>4.739590</td><td>4.232942</td><td>4.526055</td><td>...     </td><td>2.581216</td><td>4.808071</td><td>3.327037</td><td>4.620571</td><td>4.097462</td><td>2.369325</td><td>5.018789</td><td>2.952819</td><td>4.196739</td><td>3.000762</td></tr>
+	<tr><th scope=row>Saudi-Bedouin</th><td>2.823914</td><td>2.885202</td><td>2.612489</td><td>2.546968</td><td>2.613394</td><td>1.925055</td><td>3.246662</td><td>2.879492</td><td>2.824911</td><td>2.613697</td><td>...     </td><td>3.459707</td><td>2.368952</td><td>2.358393</td><td>2.903828</td><td>2.991424</td><td>1.670826</td><td>2.484616</td><td>2.665096</td><td>2.354383</td><td>2.676963</td></tr>
+	<tr><th scope=row>Finn-Estonian</th><td>3.614387</td><td>4.575499</td><td>2.765608</td><td>3.039932</td><td>3.163119</td><td>3.269460</td><td>4.945608</td><td>4.827026</td><td>3.728493</td><td>4.764230</td><td>...     </td><td>2.368952</td><td>5.352966</td><td>3.475825</td><td>4.462340</td><td>3.795237</td><td>2.523631</td><td>4.130325</td><td>3.112070</td><td>3.946673</td><td>2.788193</td></tr>
+	<tr><th scope=row>Caucasian_northeast</th><td>3.567321</td><td>4.040610</td><td>3.428114</td><td>2.997220</td><td>3.248957</td><td>2.544630</td><td>3.587435</td><td>4.274951</td><td>3.320404</td><td>3.445311</td><td>...     </td><td>2.358393</td><td>3.475825</td><td>4.038563</td><td>3.428918</td><td>3.390797</td><td>2.478726</td><td>3.153748</td><td>3.127525</td><td>3.350679</td><td>2.848894</td></tr>
+	<tr><th scope=row>Basque-Spanish_north</th><td>3.827562</td><td>3.868057</td><td>3.776191</td><td>3.342695</td><td>3.264755</td><td>3.151597</td><td>4.512812</td><td>5.089133</td><td>4.362276</td><td>4.775463</td><td>...     </td><td>2.903828</td><td>4.462340</td><td>3.428918</td><td>6.334322</td><td>3.740825</td><td>2.485862</td><td>4.234973</td><td>3.510173</td><td>3.732510</td><td>3.188301</td></tr>
+	<tr><th scope=row>Turk_northeast</th><td>3.922625</td><td>4.637490</td><td>4.028971</td><td>3.436756</td><td>3.452253</td><td>2.696523</td><td>3.393683</td><td>4.799221</td><td>3.637298</td><td>3.487457</td><td>...     </td><td>2.991424</td><td>3.795237</td><td>3.390797</td><td>3.740825</td><td>5.567057</td><td>2.607602</td><td>3.496869</td><td>3.502289</td><td>3.337411</td><td>3.312384</td></tr>
+	<tr><th scope=row>Turkmen-Uzbek</th><td>2.652671</td><td>2.268164</td><td>2.501345</td><td>2.120618</td><td>2.249355</td><td>2.577885</td><td>2.902093</td><td>2.911683</td><td>2.450149</td><td>2.161759</td><td>...     </td><td>1.670826</td><td>2.523631</td><td>2.478726</td><td>2.485862</td><td>2.607602</td><td>2.142384</td><td>2.577788</td><td>2.341655</td><td>2.672197</td><td>2.112276</td></tr>
+	<tr><th scope=row>Pole-Ukrainian_north</th><td>3.633420</td><td>4.517542</td><td>3.005249</td><td>2.969194</td><td>3.178089</td><td>3.100921</td><td>4.790434</td><td>4.522266</td><td>4.125276</td><td>4.225695</td><td>...     </td><td>2.484616</td><td>4.130325</td><td>3.153748</td><td>4.234973</td><td>3.496869</td><td>2.577788</td><td>5.337947</td><td>2.950134</td><td>4.011181</td><td>2.629687</td></tr>
+	<tr><th scope=row>Lebanese</th><td>3.310842</td><td>3.500798</td><td>3.496043</td><td>2.578746</td><td>2.899116</td><td>2.325768</td><td>3.268474</td><td>3.775594</td><td>3.457325</td><td>3.044348</td><td>...     </td><td>2.665096</td><td>3.112070</td><td>3.127525</td><td>3.510173</td><td>3.502289</td><td>2.341655</td><td>2.950134</td><td>3.688869</td><td>2.744170</td><td>2.916597</td></tr>
+	<tr><th scope=row>Chuvash-Tatar_Volga</th><td>3.269239</td><td>3.481588</td><td>3.113089</td><td>2.808711</td><td>3.205130</td><td>3.404594</td><td>4.145539</td><td>4.373094</td><td>3.949356</td><td>4.171809</td><td>...     </td><td>2.354383</td><td>3.946673</td><td>3.350679</td><td>3.732510</td><td>3.337411</td><td>2.672197</td><td>4.011181</td><td>2.744170</td><td>4.145760</td><td>2.705277</td></tr>
+	<tr><th scope=row>Palestinian-Jordanian</th><td>3.042230</td><td>3.084774</td><td>3.252860</td><td>3.003396</td><td>2.981461</td><td>2.229964</td><td>3.089325</td><td>3.836185</td><td>2.941913</td><td>2.977554</td><td>...     </td><td>2.676963</td><td>2.788193</td><td>2.848894</td><td>3.188301</td><td>3.312384</td><td>2.112276</td><td>2.629687</td><td>2.916597</td><td>2.705277</td><td>3.693855</td></tr>
+</tbody>
+</table>
+
+
+
+
+```R
+updated_nj_pops_N
+```
+
+
+<ol class=list-inline>
+	<li>'Adygei (N=31)'</li>
+	<li>'Albanian (N=6)'</li>
+	<li>'Armenian (N=13)'</li>
+	<li>'Assyrian (N=15)'</li>
+	<li>'Azeri (N=20)'</li>
+	<li>'Bashkir (N=53)'</li>
+	<li>'Belarusian (N=10)'</li>
+	<li>'Bulgarian (N=10)'</li>
+	<li>'Croatian (N=10)'</li>
+	<li>'Czech (N=10)'</li>
+	<li>'Druze (N=39)'</li>
+	<li>'Egyptian (N=18)'</li>
+	<li>'French (N=54)'</li>
+	<li>'French_south (N=7)'</li>
+	<li>'Georgian (N=25)'</li>
+	<li>'Greek (N=36)'</li>
+	<li>'Hungarian (N=20)'</li>
+	<li>'Icelandic (N=12)'</li>
+	<li>'Iranian_gulf (N=8)'</li>
+	<li>'Iranian (N=38)'</li>
+	<li>'Italian_north (N=20)'</li>
+	<li>'Kurd (N=10)'</li>
+	<li>'Maltese (N=8)'</li>
+	<li>'Mordovian (N=32)'</li>
+	<li>'Pathan (N=17)'</li>
+	<li>'Russian (N=71)'</li>
+	<li>'Russian_nordic (N=16)'</li>
+	<li>'Sardinian (N=27)'</li>
+	<li>'Spanish (N=173)'</li>
+	<li>'Syrian (N=8)'</li>
+	<li>'Tatar_Siberian (N=24)'</li>
+	<li>'Turk_central (N=10)'</li>
+	<li>'Turk_mixed (N=14)'</li>
+	<li>'Turk_south (N=10)'</li>
+	<li>'Turk_west (N=12)'</li>
+	<li>'Ukrainian (N=13)'</li>
+	<li>'NorthAfrican_west (N=30)'</li>
+	<li>'Italian_central_south (N=8)'</li>
+	<li>'Brit (N=14)'</li>
+	<li>'Romanian-Moldavian (N=20)'</li>
+	<li>'Swede-Norwegian-German (N=16)'</li>
+	<li>'Lithuanian-Latvian (N=13)'</li>
+	<li>'Saudi-Bedouin (N=52)'</li>
+	<li>'Finn-Estonian (N=18)'</li>
+	<li>'Caucasian_northeast (N=35)'</li>
+	<li>'Basque-Spanish_north (N=34)'</li>
+	<li>'Turk_northeast (N=17)'</li>
+	<li>'Turkmen-Uzbek (N=33)'</li>
+	<li>'Pole-Ukrainian_north (N=13)'</li>
+	<li>'Lebanese (N=28)'</li>
+	<li>'Chuvash-Tatar_Volga (N=39)'</li>
+	<li>'Palestinian-Jordanian (N=47)'</li>
+</ol>
+
+
+
+
+```R
+options(repr.plot.width=14, repr.plot.height=11)
+par(cex.main=1.2)
+
+dend_pops <- updated_nj_pops_ibd_mt %>% dist %>% hclust(method="ward.D2") %>% as.dendrogram %>% color_branches(k=8)
+  
+color_func <- colorspace::sequential_hcl(36, "Inferno") # Or "Reds" or "Inferno" ?
+
+updated_nj_pops_N_new <- updated_nj_pops_N
+updated_nj_pops_N_new <- str_replace(updated_nj_pops_N_new, '(?<=_\\w{0,20})\\s', ') ')
+updated_nj_pops_N_new <- str_replace(updated_nj_pops_N_new, '_', ' (')
+updated_nj_pops_N_new <- str_replace(updated_nj_pops_N_new, '_', '-')
+
+
+## Red for AJs later
+# Brown for Turkish-Caucasus populations
+# Black for other Middle-East and North-African populations
+# darkorange for Siberian-Central Asian populations 
+# Darkgreen for Southern, purple for Eastern Europe and Southerneast Europe
+# blue for Western-Central-Northern Europe 
+nj_labels_color <- c("brown", "purple", "brown", "black", "brown", "darkorange", "purple", "purple", 
+                    "purple", "blue", "black", "black", "blue", "blue", "brown", "darkgreen", "blue",
+                    "blue", "black", "black", "darkgreen", "black", "darkgreen", "purple", "darkorange",
+                    "purple", "purple", "darkgreen", "darkgreen", "black", "darkorange", "brown","brown",
+                    "brown","brown", "purple", "black", "darkgreen", "blue", "purple", "blue", "purple",
+                    "black", "blue", "brown", "darkgreen", "brown", "darkorange", "purple", "black", "purple",
+                     "black")
+nj_labels_color %>% length
+
+gplots::heatmap.2(as.matrix(updated_nj_pops_ibd_mt), key=FALSE, 
+        #main = paste("Ward's HClust for IBD of 52 NJ populations"),
+        srtCol = 45, 
+        dendrogram = "both",
+        Rowv = rev(dend_pops),
+        Colv = dend_pops,
+        colRow = nj_labels_color, colCol = nj_labels_color,
+        trace="none",          
+        margins =c(7,13),      
+        key.xlab = "Mean pairwise IBD length(cM)",
+        labCol = str_replace(updated_nj_pops_N_new, "\\s\\(N=[0-9]+\\)", ''),
+        labRow = updated_nj_pops_N_new,
+        denscol = "grey",
+        density.info = "density",
+        col = rev(color_func))
+```
+
+
+52
+
+
+
+![png](README_files/README_51_1.png)
+
+
+<a name="nj-all-aj-ibd"></a>
+### Add the AJs for calculations then
+
+```R
+typical_aj_pops <- paste(all_aj_countries, "AJ", sep="")
+combined_pops <- c(typical_aj_pops, updated_nj_pops)
+all_pops_ibd_mt <- data.frame(matrix(, ncol = length(combined_pops), nrow = length(combined_pops)))
+colnames(all_pops_ibd_mt) <- combined_pops
+rownames(all_pops_ibd_mt) <- combined_pops
+combined_pops_N <- c()
+
+for (row_pop in combined_pops){
+    for (col_pop in combined_pops){
+      ## symmetric, i.e. m[i,j]==m[j,i]
+      if (!is.na(all_pops_ibd_mt[col_pop, row_pop])) {
+          all_pops_ibd_mt[row_pop, col_pop] <- all_pops_ibd_mt[col_pop, row_pop]
+          next
+      }
+      ## if both populations are not concatenated
+      if (!row_pop %in% nj_merged_new_pops && !col_pop %in% nj_merged_new_pops) {
+        if (row_pop == col_pop) {
+            if (row_pop %in% typical_aj_pops) {
+                filtered_intra_ibd_df <- get_jews_intra_ibd(row_pop)
+            } else {
+                filtered_intra_ibd_df <- get_nj_intra_ibd_df(row_pop)
+            }
+            all_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_intra_ibd_df$IBD_cM)
+            row_pop_N <- c(filtered_intra_ibd_df$pop1_iid, filtered_intra_ibd_df$pop2_iid) %>% unique %>% length
+            new_row_pop <- gsub("Turkish_", "Turk_", row_pop)
+            row_pop_N_str <- paste(new_row_pop, " (N=", row_pop_N, ")", sep="")
+            combined_pops_N <- c(combined_pops_N, row_pop_N_str)
+            filtered_intra_ibd_df <- NA
+            next
+        }
+        if (row_pop %in% typical_aj_pops && col_pop %in% typical_aj_pops) {
+            filtered_inter_row_col_pops_df <- get_aj_oaj_ibd(row_pop, col_pop)
+        }
+        else if (row_pop %in% typical_aj_pops && !col_pop %in% typical_aj_pops) {
+            filtered_inter_row_col_pops_df <- get_aj_nj_ibd(row_pop, col_pop)
+        } 
+        else {
+            filtered_inter_row_col_pops_df <- get_nj_inter_df(row_pop, col_pop)
+        }
+        all_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_inter_row_col_pops_df$IBD_cM)
+        filtered_inter_row_col_pops_df <- NA
+      }
+      ## Since all concatenated populations(13 in total) are at the end of $combined_pops,
+      ### we would only have non-concatenated $row_pop and concatenated $col_pop
+      else if (!row_pop %in% nj_merged_new_pops && col_pop %in% nj_merged_new_pops) {
+          col_pops <- nj_merge_list[[which(nj_merged_new_pops==col_pop)]][-1]
+          ibd_df_colnames <- c("pop1", "pop1_iid", "pop2", "pop2_iid", "IBD_cM")
+          merged_ibd_df <- data.frame(matrix(, ncol = length(ibd_df_colnames), nrow = 0))
+          colnames(merged_ibd_df) <- ibd_df_colnames
+          merged_ibd_df$pop1 <- merged_ibd_df$pop1 %>% as.character
+          merged_ibd_df$pop2 <- merged_ibd_df$pop2 %>% as.character
+          merged_ibd_df$pop1_iid <- merged_ibd_df$pop1_iid %>% as.character
+          merged_ibd_df$pop2_iid <- merged_ibd_df$pop2_iid %>% as.character
+          merged_ibd_df$IBD_cM <- merged_ibd_df$IBD_cM %>% as.numeric
+          for (pop in col_pops) {
+              if (row_pop %in% typical_aj_pops) {
+                  merged_ibd_df <- bind_rows(merged_ibd_df, get_aj_nj_ibd(row_pop, pop))
+              } else {
+                  merged_ibd_df <- bind_rows(merged_ibd_df, get_nj_inter_df(row_pop, pop))
+              }                                              
+          }
+          all_pops_ibd_mt[row_pop, col_pop] <- mean(merged_ibd_df$IBD_cM)
+          merged_ibd_df <- NA
+      }
+      ## if both populations are concatenated
+      else if (row_pop %in% nj_merged_new_pops && col_pop %in% nj_merged_new_pops) {
+          ## if at the diagonal line
+          if (row_pop==col_pop) {
+            row_pops <- nj_merge_list[[which(nj_merged_new_pops==row_pop)]][-1]
+            filtered_intra_ibd_df <- get_merged_pop_intra_ibd(row_pops)
+            all_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_intra_ibd_df$IBD_cM)
+            concat_iids <- c(filtered_intra_ibd_df$pop1_iid, filtered_intra_ibd_df$pop2_iid)
+            row_pop_N <- concat_iids %>% str_replace_all("\\.", "\\-") %>% unique %>% length
+            new_row_pop <- gsub("Turkish_", "Turk_", row_pop)
+            row_pop_N_str <- paste(new_row_pop, " (N=", row_pop_N, ")", sep="")
+            combined_pops_N <- c(combined_pops_N, row_pop_N_str)
+            filtered_intra_ibd_df <- NA
+            next
+          }
+          ## if not at the diagional line
+          row_pops <- nj_merge_list[[which(nj_merged_new_pops==row_pop)]][-1]
+          col_pops <- nj_merge_list[[which(nj_merged_new_pops==col_pop)]][-1]
+          filtered_inter_row_col_pops_ibd_df <- get_merged_pops_inter_ibd(row_pops, col_pops)
+          all_pops_ibd_mt[row_pop, col_pop] <- mean(filtered_inter_row_col_pops_ibd_df$IBD_cM)
+          filtered_inter_row_col_pops_ibd_df <- NA
+      }
+    }
+}
+
+combined_pops_N_new <- combined_pops_N
+combined_pops_N_new <- str_replace(combined_pops_N_new, '(?<=_\\w{0,20})\\s', ') ')
+combined_pops_N_new <- str_replace(combined_pops_N_new, '_', ' (')
+combined_pops_N_new <- str_replace(combined_pops_N_new, '_', '-')
+all_pops_ibd_mt %>% dim
+all_pops_ibd_mt
+```
+
+
+<ol class=list-inline>
+	<li>64</li>
+	<li>64</li>
+</ol>
+
+
+<table>
+<thead><tr><th></th><th scope=col>NetherlandsAJ</th><th scope=col>GermanyAJ</th><th scope=col>CzechiaAJ</th><th scope=col>LatviaAJ</th><th scope=col>AustriaAJ</th><th scope=col>PolandAJ</th><th scope=col>UkraineAJ</th><th scope=col>RussiaAJ</th><th scope=col>LithuaniaAJ</th><th scope=col>HungaryAJ</th><th scope=col>...</th><th scope=col>Saudi-Bedouin</th><th scope=col>Finn-Estonian</th><th scope=col>Caucasian_northeast</th><th scope=col>Basque-Spanish_north</th><th scope=col>Turk_northeast</th><th scope=col>Turkmen-Uzbek</th><th scope=col>Pole-Ukrainian_north</th><th scope=col>Lebanese</th><th scope=col>Chuvash-Tatar_Volga</th><th scope=col>Palestinian-Jordanian</th></tr></thead>
+<tbody>
+	<tr><th scope=row>NetherlandsAJ</th><td>7.387417</td><td>5.684752</td><td>5.614230</td><td>4.776921</td><td>5.740275</td><td>5.128309</td><td>5.662625</td><td>4.494057</td><td>4.658430</td><td>5.439302</td><td>...     </td><td>2.664440</td><td>3.531231</td><td>3.102469</td><td>4.519966</td><td>3.993496</td><td>1.964213</td><td>3.564015</td><td>3.457276</td><td>3.643489</td><td>3.097927</td></tr>
+	<tr><th scope=row>GermanyAJ</th><td>5.684752</td><td>6.578104</td><td>6.367047</td><td>5.835891</td><td>5.433294</td><td>5.746501</td><td>5.916372</td><td>5.691315</td><td>5.988171</td><td>6.063730</td><td>...     </td><td>3.029225</td><td>3.543282</td><td>3.234309</td><td>4.042313</td><td>3.984154</td><td>2.604734</td><td>3.928406</td><td>3.567029</td><td>3.569040</td><td>3.399191</td></tr>
+	<tr><th scope=row>CzechiaAJ</th><td>5.614230</td><td>6.367047</td><td>6.019122</td><td>5.448331</td><td>5.174700</td><td>5.530040</td><td>5.328873</td><td>5.406087</td><td>5.829266</td><td>5.601953</td><td>...     </td><td>2.993108</td><td>3.821720</td><td>3.425306</td><td>4.089443</td><td>3.799112</td><td>2.409414</td><td>4.042600</td><td>3.476935</td><td>3.254756</td><td>3.458546</td></tr>
+	<tr><th scope=row>LatviaAJ</th><td>4.776921</td><td>5.835891</td><td>5.448331</td><td>3.881938</td><td>5.865729</td><td>5.554047</td><td>5.303719</td><td>5.052756</td><td>4.835045</td><td>5.363957</td><td>...     </td><td>2.570473</td><td>3.307304</td><td>3.632445</td><td>4.197921</td><td>4.125095</td><td>2.348991</td><td>4.064882</td><td>3.266974</td><td>3.179023</td><td>3.151025</td></tr>
+	<tr><th scope=row>AustriaAJ</th><td>5.740275</td><td>5.433294</td><td>5.174700</td><td>5.865729</td><td>6.705910</td><td>5.093223</td><td>5.489792</td><td>4.755418</td><td>5.527201</td><td>5.690068</td><td>...     </td><td>2.910175</td><td>2.984527</td><td>3.865454</td><td>4.393177</td><td>3.992959</td><td>2.449542</td><td>3.421486</td><td>3.805013</td><td>4.123583</td><td>3.604144</td></tr>
+	<tr><th scope=row>PolandAJ</th><td>5.128309</td><td>5.746501</td><td>5.530040</td><td>5.554047</td><td>5.093223</td><td>5.723591</td><td>5.661701</td><td>5.293543</td><td>5.644015</td><td>5.888033</td><td>...     </td><td>3.033939</td><td>3.779951</td><td>3.649843</td><td>4.211973</td><td>4.213442</td><td>2.663409</td><td>3.891155</td><td>3.383990</td><td>3.522295</td><td>3.512798</td></tr>
+	<tr><th scope=row>UkraineAJ</th><td>5.662625</td><td>5.916372</td><td>5.328873</td><td>5.303719</td><td>5.489792</td><td>5.661701</td><td>5.806906</td><td>5.458133</td><td>5.588344</td><td>5.658569</td><td>...     </td><td>3.145689</td><td>3.910169</td><td>3.456304</td><td>4.292150</td><td>4.324201</td><td>2.679341</td><td>4.057432</td><td>3.684794</td><td>3.638325</td><td>3.641085</td></tr>
+	<tr><th scope=row>RussiaAJ</th><td>4.494057</td><td>5.691315</td><td>5.406087</td><td>5.052756</td><td>4.755418</td><td>5.293543</td><td>5.458133</td><td>4.970164</td><td>5.433527</td><td>5.152243</td><td>...     </td><td>2.967970</td><td>3.797208</td><td>3.604966</td><td>4.088997</td><td>3.987576</td><td>2.690971</td><td>3.816692</td><td>3.487504</td><td>3.670760</td><td>3.274099</td></tr>
+	<tr><th scope=row>LithuaniaAJ</th><td>4.658430</td><td>5.988171</td><td>5.829266</td><td>4.835045</td><td>5.527201</td><td>5.644015</td><td>5.588344</td><td>5.433527</td><td>5.679175</td><td>5.531684</td><td>...     </td><td>3.062366</td><td>3.781832</td><td>3.706213</td><td>4.304982</td><td>3.895456</td><td>2.911784</td><td>3.763035</td><td>3.848268</td><td>3.631431</td><td>3.573895</td></tr>
+	<tr><th scope=row>HungaryAJ</th><td>5.439302</td><td>6.063730</td><td>5.601953</td><td>5.363957</td><td>5.690068</td><td>5.888033</td><td>5.658569</td><td>5.152243</td><td>5.531684</td><td>5.498632</td><td>...     </td><td>3.023238</td><td>4.115022</td><td>3.293921</td><td>4.107750</td><td>4.242402</td><td>2.478435</td><td>3.910879</td><td>3.505847</td><td>3.678129</td><td>3.395493</td></tr>
+	<tr><th scope=row>RomaniaAJ</th><td>5.788672</td><td>5.914351</td><td>5.501878</td><td>4.796545</td><td>5.322782</td><td>5.730385</td><td>5.743991</td><td>5.147363</td><td>5.805319</td><td>5.785865</td><td>...     </td><td>2.954090</td><td>3.806777</td><td>3.345972</td><td>4.053140</td><td>3.654834</td><td>2.543111</td><td>3.858261</td><td>3.148791</td><td>3.561231</td><td>3.465896</td></tr>
+	<tr><th scope=row>BelarusAJ</th><td>4.661666</td><td>5.856119</td><td>5.643887</td><td>5.325558</td><td>4.877118</td><td>5.519930</td><td>5.553848</td><td>5.386329</td><td>5.648732</td><td>5.545408</td><td>...     </td><td>3.056112</td><td>3.670948</td><td>3.443087</td><td>4.054683</td><td>4.062149</td><td>2.503662</td><td>3.979712</td><td>3.786779</td><td>3.220884</td><td>3.141805</td></tr>
+	<tr><th scope=row>Adygei</th><td>3.395732</td><td>3.973844</td><td>3.503725</td><td>3.128248</td><td>4.181020</td><td>3.924466</td><td>3.878116</td><td>3.718312</td><td>3.698546</td><td>3.649131</td><td>...     </td><td>2.823914</td><td>3.614387</td><td>3.567321</td><td>3.827562</td><td>3.922625</td><td>2.652671</td><td>3.633420</td><td>3.310842</td><td>3.269239</td><td>3.042230</td></tr>
+	<tr><th scope=row>Albanian</th><td>2.748512</td><td>3.825491</td><td>4.412957</td><td>4.277438</td><td>3.014087</td><td>4.189446</td><td>3.837169</td><td>4.047519</td><td>4.002263</td><td>3.952501</td><td>...     </td><td>2.885202</td><td>4.575499</td><td>4.040610</td><td>3.868057</td><td>4.637490</td><td>2.268164</td><td>4.517542</td><td>3.500798</td><td>3.481588</td><td>3.084774</td></tr>
+	<tr><th scope=row>Armenian</th><td>4.945338</td><td>4.038401</td><td>3.816521</td><td>3.761800</td><td>3.184860</td><td>3.954699</td><td>3.631430</td><td>3.937396</td><td>3.759869</td><td>3.592181</td><td>...     </td><td>2.612489</td><td>2.765608</td><td>3.428114</td><td>3.776191</td><td>4.028971</td><td>2.501345</td><td>3.005249</td><td>3.496043</td><td>3.113089</td><td>3.252860</td></tr>
+	<tr><th scope=row>Assyrian</th><td>3.905115</td><td>3.577454</td><td>3.663187</td><td>3.571785</td><td>4.165659</td><td>3.687081</td><td>3.659057</td><td>3.720291</td><td>3.607803</td><td>3.408692</td><td>...     </td><td>2.546968</td><td>3.039932</td><td>2.997220</td><td>3.342695</td><td>3.436756</td><td>2.120618</td><td>2.969194</td><td>2.578746</td><td>2.808711</td><td>3.003396</td></tr>
+	<tr><th scope=row>Azeri</th><td>2.752817</td><td>3.293659</td><td>3.258586</td><td>3.183644</td><td>3.596176</td><td>3.360402</td><td>3.552550</td><td>3.327353</td><td>3.401319</td><td>3.474063</td><td>...     </td><td>2.613394</td><td>3.163119</td><td>3.248957</td><td>3.264755</td><td>3.452253</td><td>2.249355</td><td>3.178089</td><td>2.899116</td><td>3.205130</td><td>2.981461</td></tr>
+	<tr><th scope=row>Bashkir</th><td>2.449659</td><td>2.874653</td><td>2.968030</td><td>2.628038</td><td>2.448043</td><td>2.843730</td><td>3.125979</td><td>2.995853</td><td>3.046551</td><td>2.843331</td><td>...     </td><td>1.925055</td><td>3.269460</td><td>2.544630</td><td>3.151597</td><td>2.696523</td><td>2.577885</td><td>3.100921</td><td>2.325768</td><td>3.404594</td><td>2.229964</td></tr>
+	<tr><th scope=row>Belarusian</th><td>2.941092</td><td>4.016725</td><td>4.874332</td><td>4.449983</td><td>4.000174</td><td>4.046399</td><td>4.206966</td><td>4.385500</td><td>4.436931</td><td>4.196886</td><td>...     </td><td>3.246662</td><td>4.945608</td><td>3.587435</td><td>4.512812</td><td>3.393683</td><td>2.902093</td><td>4.790434</td><td>3.268474</td><td>4.145539</td><td>3.089325</td></tr>
+	<tr><th scope=row>Bulgarian</th><td>4.821544</td><td>4.666930</td><td>4.628811</td><td>5.389973</td><td>3.846370</td><td>4.470820</td><td>4.909249</td><td>4.562211</td><td>4.590574</td><td>4.710261</td><td>...     </td><td>2.879492</td><td>4.827026</td><td>4.274951</td><td>5.089133</td><td>4.799221</td><td>2.911683</td><td>4.522266</td><td>3.775594</td><td>4.373094</td><td>3.836185</td></tr>
+	<tr><th scope=row>Croatian</th><td>3.596068</td><td>4.052931</td><td>3.480581</td><td>4.568613</td><td>3.712070</td><td>3.971283</td><td>4.083367</td><td>4.084726</td><td>4.348418</td><td>4.226734</td><td>...     </td><td>2.824911</td><td>3.728493</td><td>3.320404</td><td>4.362276</td><td>3.637298</td><td>2.450149</td><td>4.125276</td><td>3.457325</td><td>3.949356</td><td>2.941913</td></tr>
+	<tr><th scope=row>Czech</th><td>4.707008</td><td>3.745370</td><td>4.220592</td><td>2.936637</td><td>3.762448</td><td>4.161390</td><td>4.361917</td><td>3.898508</td><td>4.138513</td><td>3.706514</td><td>...     </td><td>2.613697</td><td>4.764230</td><td>3.445311</td><td>4.775463</td><td>3.487457</td><td>2.161759</td><td>4.225695</td><td>3.044348</td><td>4.171809</td><td>2.977554</td></tr>
+	<tr><th scope=row>Druze</th><td>3.801549</td><td>3.685206</td><td>3.786165</td><td>3.899880</td><td>3.698897</td><td>3.640786</td><td>3.769908</td><td>3.535334</td><td>3.862414</td><td>3.926833</td><td>...     </td><td>2.757963</td><td>3.427340</td><td>3.201921</td><td>3.409645</td><td>3.837274</td><td>2.406190</td><td>3.069017</td><td>3.345886</td><td>2.877479</td><td>3.099290</td></tr>
+	<tr><th scope=row>Egyptian</th><td>2.919055</td><td>2.583716</td><td>2.978393</td><td>2.719561</td><td>2.614638</td><td>2.665126</td><td>2.652599</td><td>2.620101</td><td>2.751303</td><td>2.527086</td><td>...     </td><td>2.259354</td><td>2.206818</td><td>2.210128</td><td>2.745741</td><td>2.987387</td><td>1.508634</td><td>2.418025</td><td>2.476235</td><td>1.971977</td><td>2.325258</td></tr>
+	<tr><th scope=row>French</th><td>4.006378</td><td>4.055210</td><td>4.039146</td><td>3.821402</td><td>3.980507</td><td>4.300490</td><td>4.305640</td><td>4.040531</td><td>4.240463</td><td>4.046389</td><td>...     </td><td>2.749350</td><td>4.641496</td><td>3.597354</td><td>4.584697</td><td>3.832942</td><td>2.522926</td><td>4.283498</td><td>3.359992</td><td>3.788508</td><td>3.240673</td></tr>
+	<tr><th scope=row>French_south</th><td>3.099579</td><td>4.370102</td><td>4.897653</td><td>3.837892</td><td>4.114262</td><td>4.262415</td><td>4.547919</td><td>4.046506</td><td>4.494538</td><td>4.587754</td><td>...     </td><td>2.956895</td><td>4.960668</td><td>3.504449</td><td>5.031885</td><td>3.662568</td><td>2.568611</td><td>4.015370</td><td>3.459609</td><td>3.708366</td><td>3.085779</td></tr>
+	<tr><th scope=row>Georgian</th><td>3.133433</td><td>3.548508</td><td>3.507898</td><td>3.869603</td><td>3.666480</td><td>3.871311</td><td>3.965421</td><td>4.095453</td><td>3.813289</td><td>3.705924</td><td>...     </td><td>2.812242</td><td>3.387050</td><td>3.313804</td><td>3.802879</td><td>4.060197</td><td>2.567823</td><td>3.545730</td><td>3.361910</td><td>3.152259</td><td>3.049960</td></tr>
+	<tr><th scope=row>Greek</th><td>4.211445</td><td>4.178509</td><td>4.074478</td><td>3.571350</td><td>3.779655</td><td>4.158595</td><td>4.050648</td><td>4.175176</td><td>4.246171</td><td>3.975285</td><td>...     </td><td>2.787446</td><td>3.830226</td><td>3.631350</td><td>4.284907</td><td>4.142388</td><td>2.575030</td><td>4.079727</td><td>3.337312</td><td>3.545090</td><td>3.084381</td></tr>
+	<tr><th scope=row>Hungarian</th><td>4.462533</td><td>4.056149</td><td>3.975905</td><td>3.912759</td><td>3.368629</td><td>4.233948</td><td>4.319478</td><td>4.085814</td><td>4.329834</td><td>4.290312</td><td>...     </td><td>2.637832</td><td>4.527633</td><td>3.777091</td><td>4.296765</td><td>4.104029</td><td>2.581265</td><td>4.593208</td><td>3.188257</td><td>4.175267</td><td>3.212243</td></tr>
+	<tr><th scope=row>Icelandic</th><td>3.598102</td><td>4.468850</td><td>4.322257</td><td>3.531452</td><td>4.530334</td><td>4.569377</td><td>4.432127</td><td>4.397292</td><td>4.310573</td><td>4.703355</td><td>...     </td><td>3.067290</td><td>4.745093</td><td>3.651085</td><td>4.866790</td><td>3.955871</td><td>2.933679</td><td>4.542870</td><td>3.412485</td><td>4.085153</td><td>3.027714</td></tr>
+	<tr><th scope=row>...</th><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>   </td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td><td>...</td></tr>
+	<tr><th scope=row>Maltese</th><td>3.226028</td><td>4.367153</td><td>3.473659</td><td>3.612936</td><td>2.790862</td><td>3.720869</td><td>4.183693</td><td>3.547034</td><td>4.367750</td><td>3.472771</td><td>...     </td><td>2.674826</td><td>3.527263</td><td>3.165011</td><td>3.977358</td><td>3.622537</td><td>2.407085</td><td>3.863056</td><td>3.196228</td><td>3.347106</td><td>2.988969</td></tr>
+	<tr><th scope=row>Mordovian</th><td>2.956793</td><td>3.612969</td><td>3.576524</td><td>3.884802</td><td>3.892053</td><td>3.733713</td><td>4.103348</td><td>3.968351</td><td>3.952756</td><td>3.737033</td><td>...     </td><td>2.477476</td><td>4.493400</td><td>3.443533</td><td>4.183244</td><td>3.875241</td><td>2.562764</td><td>4.028867</td><td>3.060146</td><td>4.122899</td><td>2.831956</td></tr>
+	<tr><th scope=row>Pathan</th><td>2.180968</td><td>2.569991</td><td>2.879182</td><td>2.737076</td><td>1.931473</td><td>3.005263</td><td>2.842567</td><td>2.916218</td><td>2.905169</td><td>2.577662</td><td>...     </td><td>1.644341</td><td>2.735797</td><td>2.646299</td><td>2.550336</td><td>2.824577</td><td>2.134891</td><td>2.458862</td><td>2.031262</td><td>2.690757</td><td>2.377361</td></tr>
+	<tr><th scope=row>Russian</th><td>3.796465</td><td>4.066281</td><td>3.903021</td><td>4.120470</td><td>3.766063</td><td>4.010599</td><td>4.126556</td><td>3.989278</td><td>4.075563</td><td>4.201561</td><td>...     </td><td>2.541922</td><td>4.614048</td><td>3.622220</td><td>4.304924</td><td>3.645546</td><td>2.607792</td><td>4.549791</td><td>2.997586</td><td>3.997478</td><td>2.961122</td></tr>
+	<tr><th scope=row>Russian_nordic</th><td>4.136505</td><td>3.701457</td><td>3.694138</td><td>3.222315</td><td>3.486143</td><td>3.784870</td><td>3.737229</td><td>3.690168</td><td>3.431516</td><td>3.801593</td><td>...     </td><td>2.511424</td><td>4.421129</td><td>3.373668</td><td>3.632042</td><td>2.955330</td><td>2.412077</td><td>3.628734</td><td>2.746265</td><td>4.418582</td><td>2.551950</td></tr>
+	<tr><th scope=row>Sardinian</th><td>3.577098</td><td>4.370546</td><td>3.717193</td><td>4.381579</td><td>4.721256</td><td>4.325317</td><td>4.163537</td><td>4.229846</td><td>4.345288</td><td>4.056159</td><td>...     </td><td>3.029565</td><td>4.177673</td><td>3.303308</td><td>4.557983</td><td>4.128067</td><td>2.241739</td><td>4.086758</td><td>3.462268</td><td>3.579522</td><td>3.497064</td></tr>
+	<tr><th scope=row>Spanish</th><td>3.837292</td><td>3.994535</td><td>4.237602</td><td>3.601403</td><td>4.192528</td><td>4.117551</td><td>4.226921</td><td>4.008544</td><td>4.326962</td><td>3.961855</td><td>...     </td><td>2.780183</td><td>4.036697</td><td>3.409249</td><td>4.742067</td><td>3.699817</td><td>2.510941</td><td>3.945322</td><td>3.325695</td><td>3.665652</td><td>3.258188</td></tr>
+	<tr><th scope=row>Syrian</th><td>4.140353</td><td>3.567047</td><td>3.713262</td><td>3.610698</td><td>2.168973</td><td>3.218237</td><td>3.568006</td><td>3.485627</td><td>3.478195</td><td>3.372425</td><td>...     </td><td>2.673520</td><td>3.202058</td><td>2.800129</td><td>3.189282</td><td>3.113610</td><td>2.383187</td><td>3.039013</td><td>2.949836</td><td>2.589748</td><td>2.778531</td></tr>
+	<tr><th scope=row>Tatar_Siberian</th><td>2.526876</td><td>2.484306</td><td>2.527360</td><td>2.193246</td><td>2.808292</td><td>2.608470</td><td>2.821056</td><td>2.814514</td><td>2.508661</td><td>2.780013</td><td>...     </td><td>1.699967</td><td>2.958975</td><td>2.461504</td><td>2.755975</td><td>2.448149</td><td>2.565780</td><td>2.621731</td><td>2.101675</td><td>2.979875</td><td>1.853227</td></tr>
+	<tr><th scope=row>Turkish_central</th><td>3.519217</td><td>3.432784</td><td>3.804632</td><td>3.415919</td><td>2.526288</td><td>3.524575</td><td>3.677097</td><td>3.732276</td><td>3.878804</td><td>3.855145</td><td>...     </td><td>2.771078</td><td>3.074388</td><td>3.402155</td><td>3.538990</td><td>4.072143</td><td>2.912087</td><td>3.193301</td><td>3.439280</td><td>3.068415</td><td>2.969034</td></tr>
+	<tr><th scope=row>Turkish_mixed</th><td>3.476720</td><td>3.399530</td><td>3.154337</td><td>3.733286</td><td>3.618277</td><td>3.811801</td><td>3.980336</td><td>3.790592</td><td>3.973674</td><td>3.579580</td><td>...     </td><td>2.709987</td><td>3.297668</td><td>3.593924</td><td>3.648497</td><td>3.548403</td><td>2.793069</td><td>3.593884</td><td>3.130997</td><td>3.433459</td><td>3.198755</td></tr>
+	<tr><th scope=row>Turkish_south</th><td>2.585902</td><td>3.409789</td><td>3.637219</td><td>3.339922</td><td>3.578522</td><td>3.596493</td><td>3.543235</td><td>3.363661</td><td>3.695670</td><td>3.624704</td><td>...     </td><td>2.711156</td><td>3.249719</td><td>3.486633</td><td>3.079971</td><td>3.707407</td><td>2.822943</td><td>3.339600</td><td>3.052498</td><td>3.092706</td><td>3.140253</td></tr>
+	<tr><th scope=row>Turkish_west</th><td>4.700290</td><td>3.688392</td><td>3.436376</td><td>3.742251</td><td>3.825173</td><td>3.726225</td><td>4.001432</td><td>3.884513</td><td>3.558049</td><td>3.999582</td><td>...     </td><td>2.632735</td><td>3.536950</td><td>3.392921</td><td>3.967744</td><td>3.451201</td><td>2.601894</td><td>3.263744</td><td>3.212919</td><td>3.206385</td><td>3.390407</td></tr>
+	<tr><th scope=row>Ukrainian</th><td>3.130608</td><td>4.211428</td><td>4.803727</td><td>3.149366</td><td>4.142291</td><td>4.461745</td><td>4.607256</td><td>4.033106</td><td>4.507461</td><td>4.175847</td><td>...     </td><td>2.563019</td><td>4.490588</td><td>3.869377</td><td>4.380440</td><td>4.139244</td><td>2.697169</td><td>4.331557</td><td>3.019674</td><td>4.494400</td><td>3.021465</td></tr>
+	<tr><th scope=row>NorthAfrican_west</th><td>2.422917</td><td>2.342835</td><td>2.142291</td><td>2.268819</td><td>1.806462</td><td>2.400499</td><td>2.362346</td><td>2.261752</td><td>2.356436</td><td>2.382843</td><td>...     </td><td>1.772283</td><td>2.094553</td><td>1.726684</td><td>2.018233</td><td>2.197203</td><td>1.390016</td><td>1.881166</td><td>1.883048</td><td>1.907099</td><td>1.948209</td></tr>
+	<tr><th scope=row>Italian_central_south</th><td>3.894372</td><td>4.507305</td><td>3.950626</td><td>4.052363</td><td>4.172310</td><td>4.313924</td><td>4.588239</td><td>4.586686</td><td>4.955675</td><td>3.960248</td><td>...     </td><td>3.251148</td><td>4.085664</td><td>3.866795</td><td>4.844278</td><td>4.250370</td><td>2.704636</td><td>4.612478</td><td>3.678997</td><td>3.813101</td><td>3.332770</td></tr>
+	<tr><th scope=row>Brit</th><td>3.108218</td><td>4.014854</td><td>4.288822</td><td>3.919403</td><td>3.298049</td><td>4.016546</td><td>4.347492</td><td>3.893999</td><td>4.119706</td><td>4.136473</td><td>...     </td><td>2.835298</td><td>4.273824</td><td>3.865784</td><td>4.995817</td><td>3.828127</td><td>2.784548</td><td>4.317800</td><td>3.270308</td><td>4.159678</td><td>2.880595</td></tr>
+	<tr><th scope=row>Romanian-Moldavian</th><td>3.776912</td><td>3.962858</td><td>4.233165</td><td>4.417653</td><td>3.454222</td><td>4.473349</td><td>4.404692</td><td>4.207245</td><td>4.601729</td><td>4.437896</td><td>...     </td><td>2.965645</td><td>4.605714</td><td>3.785861</td><td>4.261205</td><td>4.208111</td><td>2.852206</td><td>4.234821</td><td>3.370431</td><td>3.824312</td><td>3.477083</td></tr>
+	<tr><th scope=row>Swede-Norwegian-German</th><td>3.831713</td><td>3.418729</td><td>3.499455</td><td>3.002996</td><td>3.338045</td><td>3.825218</td><td>3.867038</td><td>3.768304</td><td>4.460439</td><td>3.551471</td><td>...     </td><td>2.702436</td><td>4.090208</td><td>3.483749</td><td>4.305821</td><td>3.427323</td><td>2.573578</td><td>4.196042</td><td>2.913281</td><td>3.947068</td><td>2.840731</td></tr>
+	<tr><th scope=row>Lithuanian-Latvian</th><td>3.479869</td><td>3.816881</td><td>3.994537</td><td>3.416921</td><td>3.628588</td><td>4.057068</td><td>4.072451</td><td>3.824415</td><td>3.981289</td><td>3.985893</td><td>...     </td><td>2.581216</td><td>4.808071</td><td>3.327037</td><td>4.620571</td><td>4.097462</td><td>2.369325</td><td>5.018789</td><td>2.952819</td><td>4.196739</td><td>3.000762</td></tr>
+	<tr><th scope=row>Saudi-Bedouin</th><td>2.664440</td><td>3.029225</td><td>2.993108</td><td>2.570473</td><td>2.910175</td><td>3.033939</td><td>3.145689</td><td>2.967970</td><td>3.062366</td><td>3.023238</td><td>...     </td><td>3.459707</td><td>2.368952</td><td>2.358393</td><td>2.903828</td><td>2.991424</td><td>1.670826</td><td>2.484616</td><td>2.665096</td><td>2.354383</td><td>2.676963</td></tr>
+	<tr><th scope=row>Finn-Estonian</th><td>3.531231</td><td>3.543282</td><td>3.821720</td><td>3.307304</td><td>2.984527</td><td>3.779951</td><td>3.910169</td><td>3.797208</td><td>3.781832</td><td>4.115022</td><td>...     </td><td>2.368952</td><td>5.352966</td><td>3.475825</td><td>4.462340</td><td>3.795237</td><td>2.523631</td><td>4.130325</td><td>3.112070</td><td>3.946673</td><td>2.788193</td></tr>
+	<tr><th scope=row>Caucasian_northeast</th><td>3.102469</td><td>3.234309</td><td>3.425306</td><td>3.632445</td><td>3.865454</td><td>3.649843</td><td>3.456304</td><td>3.604966</td><td>3.706213</td><td>3.293921</td><td>...     </td><td>2.358393</td><td>3.475825</td><td>4.038563</td><td>3.428918</td><td>3.390797</td><td>2.478726</td><td>3.153748</td><td>3.127525</td><td>3.350679</td><td>2.848894</td></tr>
+	<tr><th scope=row>Basque-Spanish_north</th><td>4.519966</td><td>4.042313</td><td>4.089443</td><td>4.197921</td><td>4.393177</td><td>4.211973</td><td>4.292150</td><td>4.088997</td><td>4.304982</td><td>4.107750</td><td>...     </td><td>2.903828</td><td>4.462340</td><td>3.428918</td><td>6.334322</td><td>3.740825</td><td>2.485862</td><td>4.234973</td><td>3.510173</td><td>3.732510</td><td>3.188301</td></tr>
+	<tr><th scope=row>Turk_northeast</th><td>3.993496</td><td>3.984154</td><td>3.799112</td><td>4.125095</td><td>3.992959</td><td>4.213442</td><td>4.324201</td><td>3.987576</td><td>3.895456</td><td>4.242402</td><td>...     </td><td>2.991424</td><td>3.795237</td><td>3.390797</td><td>3.740825</td><td>5.567057</td><td>2.607602</td><td>3.496869</td><td>3.502289</td><td>3.337411</td><td>3.312384</td></tr>
+	<tr><th scope=row>Turkmen-Uzbek</th><td>1.964213</td><td>2.604734</td><td>2.409414</td><td>2.348991</td><td>2.449542</td><td>2.663409</td><td>2.679341</td><td>2.690971</td><td>2.911784</td><td>2.478435</td><td>...     </td><td>1.670826</td><td>2.523631</td><td>2.478726</td><td>2.485862</td><td>2.607602</td><td>2.142384</td><td>2.577788</td><td>2.341655</td><td>2.672197</td><td>2.112276</td></tr>
+	<tr><th scope=row>Pole-Ukrainian_north</th><td>3.564015</td><td>3.928406</td><td>4.042600</td><td>4.064882</td><td>3.421486</td><td>3.891155</td><td>4.057432</td><td>3.816692</td><td>3.763035</td><td>3.910879</td><td>...     </td><td>2.484616</td><td>4.130325</td><td>3.153748</td><td>4.234973</td><td>3.496869</td><td>2.577788</td><td>5.337947</td><td>2.950134</td><td>4.011181</td><td>2.629687</td></tr>
+	<tr><th scope=row>Lebanese</th><td>3.457276</td><td>3.567029</td><td>3.476935</td><td>3.266974</td><td>3.805013</td><td>3.383990</td><td>3.684794</td><td>3.487504</td><td>3.848268</td><td>3.505847</td><td>...     </td><td>2.665096</td><td>3.112070</td><td>3.127525</td><td>3.510173</td><td>3.502289</td><td>2.341655</td><td>2.950134</td><td>3.688869</td><td>2.744170</td><td>2.916597</td></tr>
+	<tr><th scope=row>Chuvash-Tatar_Volga</th><td>3.643489</td><td>3.569040</td><td>3.254756</td><td>3.179023</td><td>4.123583</td><td>3.522295</td><td>3.638325</td><td>3.670760</td><td>3.631431</td><td>3.678129</td><td>...     </td><td>2.354383</td><td>3.946673</td><td>3.350679</td><td>3.732510</td><td>3.337411</td><td>2.672197</td><td>4.011181</td><td>2.744170</td><td>4.145760</td><td>2.705277</td></tr>
+	<tr><th scope=row>Palestinian-Jordanian</th><td>3.097927</td><td>3.399191</td><td>3.458546</td><td>3.151025</td><td>3.604144</td><td>3.512798</td><td>3.641085</td><td>3.274099</td><td>3.573895</td><td>3.395493</td><td>...     </td><td>2.676963</td><td>2.788193</td><td>2.848894</td><td>3.188301</td><td>3.312384</td><td>2.112276</td><td>2.629687</td><td>2.916597</td><td>2.705277</td><td>3.693855</td></tr>
+</tbody>
+</table>
+
+
+### Applying K-S test for IBD sharing between Westrn/Eastern AJs and Turkish-Caucasus/Levantine/Southern European/Eastern European populations
+
+```R
+w_ajs <- c("GermanyAJ", "AustriaAJ", "CzechiaAJ")
+e_ajs <- typical_aj_pops[!typical_aj_pops %in% c(w_ajs, "NetherlandsAJ")]
+turk_caucasus_clust <- c("Turk_northeast", "Maltese", "Turkish_west", "Druze", "Adygei", "Georgian", "Armenian",
+                 "Turkish_south", "Turkish_central", "Turkish_mixed", "Caucasian_northeast") 
+levant_clust <- c("Syrian", "Kurd", "Assyrian", "Palestinian-Jordanian", "Azeri", "Iranian", "Lebanese")
+south_eu_clust <- c("Greek", "Spanish", "Basque-Spanish_north", "Sardinian", 
+                    "Italian_north", "Italian_central_south")
+east_eu_clust <- c("Russian_nordic", "Lithuanian-Latvian", "Russian", 
+                  "Pole-Ukrainian_north", "Belarusian", "Ukrainian", "Chuvash-Tatar_Volga", "Mordovian")
+
+waj_turkcauc <- all_pops_ibd_mt[w_ajs, turk_caucasus_clust] %>% as.data.frame %>% as.matrix 
+mean(waj_turkcauc)
+eaj_turkcauc <- all_pops_ibd_mt[e_ajs, turk_caucasus_clust] %>% as.data.frame %>% as.matrix
+mean(eaj_turkcauc)
+CI(waj_turkcauc %>% as.vector, 0.95)
+CI(eaj_turkcauc %>% as.vector, 0.95)
+ks.test(waj_turkcauc %>% as.vector, eaj_turkcauc %>% as.vector)
+```
+
+
+3.60714586941527
+
+
+
+3.73001435319029
+
+
+
+<dl class=dl-horizontal>
+	<dt>upper</dt>
+		<dd>3.73839431433928</dd>
+	<dt>mean</dt>
+		<dd>3.60714586941527</dd>
+	<dt>lower</dt>
+		<dd>3.47589742449126</dd>
+</dl>
+
+
+
+
+<dl class=dl-horizontal>
+	<dt>upper</dt>
+		<dd>3.78160633759002</dd>
+	<dt>mean</dt>
+		<dd>3.73001435319029</dd>
+	<dt>lower</dt>
+		<dd>3.67842236879057</dd>
+</dl>
+
+
+
+
+    
+    	Two-sample Kolmogorov-Smirnov test
+    
+    data:  waj_turkcauc %>% as.vector and eaj_turkcauc %>% as.vector
+    D = 0.23485, p-value = 0.1218
+    alternative hypothesis: two-sided
+
+
+
+
+```R
+waj_levant <- all_pops_ibd_mt[w_ajs, levant_clust] %>% as.data.frame %>% as.matrix 
+mean(waj_levant)
+eaj_levant <- all_pops_ibd_mt[e_ajs, levant_clust] %>% as.data.frame %>% as.matrix
+mean(eaj_levant)
+CI(waj_levant %>% as.vector, 0.95)
+CI(eaj_levant %>% as.vector, 0.95)
+ks.test(waj_levant %>% as.vector, eaj_levant %>% as.vector)
+```
+
+
+3.44062714886426
+
+
+
+3.41061165810092
+
+
+
+<dl class=dl-horizontal>
+	<dt>upper</dt>
+		<dd>3.62334555929228</dd>
+	<dt>mean</dt>
+		<dd>3.44062714886426</dd>
+	<dt>lower</dt>
+		<dd>3.25790873843624</dd>
+</dl>
+
+
+
+
+<dl class=dl-horizontal>
+	<dt>upper</dt>
+		<dd>3.47851393372376</dd>
+	<dt>mean</dt>
+		<dd>3.41061165810092</dd>
+	<dt>lower</dt>
+		<dd>3.34270938247809</dd>
+</dl>
+
+
+
+
+    
+    	Two-sample Kolmogorov-Smirnov test
+    
+    data:  waj_levant %>% as.vector and eaj_levant %>% as.vector
+    D = 0.18452, p-value = 0.6155
+    alternative hypothesis: two-sided
+
+
+
+
+```R
+waj_east_eu <- all_pops_ibd_mt[w_ajs, east_eu_clust] %>% as.data.frame %>% as.matrix 
+mean(waj_east_eu)
+eaj_east_eu <- all_pops_ibd_mt[e_ajs, east_eu_clust] %>% as.data.frame %>% as.matrix
+mean(eaj_east_eu)
+CI(waj_east_eu %>% as.vector, 0.95)
+CI(eaj_east_eu %>% as.vector, 0.95)
+ks.test(waj_east_eu %>% as.vector, eaj_east_eu %>% as.vector)
+```
+
+
+3.896966790738
+
+
+
+3.90619999953048
+
+
+
+<dl class=dl-horizontal>
+	<dt>upper</dt>
+		<dd>4.05803495588225</dd>
+	<dt>mean</dt>
+		<dd>3.896966790738</dd>
+	<dt>lower</dt>
+		<dd>3.73589862559376</dd>
+</dl>
+
+
+
+
+<dl class=dl-horizontal>
+	<dt>upper</dt>
+		<dd>3.98794606846249</dd>
+	<dt>mean</dt>
+		<dd>3.90619999953048</dd>
+	<dt>lower</dt>
+		<dd>3.82445393059847</dd>
+</dl>
+
+
+
+
+    
+    	Two-sample Kolmogorov-Smirnov test
+    
+    data:  waj_east_eu %>% as.vector and eaj_east_eu %>% as.vector
+    D = 0.125, p-value = 0.9187
+    alternative hypothesis: two-sided
+
+
+
+
+```R
+waj_south_eu <- all_pops_ibd_mt[w_ajs, south_eu_clust] %>% as.data.frame %>% as.matrix 
+mean(waj_south_eu)
+eaj_south_eu <- all_pops_ibd_mt[e_ajs, south_eu_clust] %>% as.data.frame %>% as.matrix
+mean(eaj_south_eu)
+CI(waj_south_eu %>% as.vector, 0.95)
+CI(eaj_south_eu %>% as.vector, 0.95)
+ks.test(waj_south_eu %>% as.vector, eaj_south_eu %>% as.vector)
+```
+
+
+4.21878165598116
+
+
+
+4.18754528388658
+
+
+
+<dl class=dl-horizontal>
+	<dt>upper</dt>
+		<dd>4.35857415161134</dd>
+	<dt>mean</dt>
+		<dd>4.21878165598116</dd>
+	<dt>lower</dt>
+		<dd>4.07898916035099</dd>
+</dl>
+
+
+
+
+<dl class=dl-horizontal>
+	<dt>upper</dt>
+		<dd>4.27079448507648</dd>
+	<dt>mean</dt>
+		<dd>4.18754528388658</dd>
+	<dt>lower</dt>
+		<dd>4.10429608269668</dd>
+</dl>
+
+
+
+
+    
+    	Two-sample Kolmogorov-Smirnov test
+    
+    data:  waj_south_eu %>% as.vector and eaj_south_eu %>% as.vector
+    D = 0.10417, p-value = 0.9962
+    alternative hypothesis: two-sided
+
+
+
+
+```R
+aj_turkcauc <- all_pops_ibd_mt[typical_aj_pops, turk_caucasus_clust] %>% as.data.frame %>% as.matrix 
+aj_levant <- all_pops_ibd_mt[typical_aj_pops, levant_clust] %>% as.data.frame %>% as.matrix 
+aj_south_eu <- all_pops_ibd_mt[typical_aj_pops, south_eu_clust] %>% as.data.frame %>% as.matrix 
+aj_east_eu <- all_pops_ibd_mt[typical_aj_pops, east_eu_clust] %>% as.data.frame %>% as.matrix 
+
+
+ks.test(aj_levant %>% as.vector, aj_turkcauc %>% as.vector)
+ks.test(aj_levant %>% as.vector, aj_south_eu %>% as.vector)
+ks.test(aj_levant %>% as.vector, aj_east_eu %>% as.vector)
+```
+
+
+    
+    	Two-sample Kolmogorov-Smirnov test
+    
+    data:  aj_levant %>% as.vector and aj_turkcauc %>% as.vector
+    D = 0.4026, p-value = 1.186e-07
+    alternative hypothesis: two-sided
+
+
+
+
+    
+    	Two-sample Kolmogorov-Smirnov test
+    
+    data:  aj_levant %>% as.vector and aj_south_eu %>% as.vector
+    D = 0.83135, p-value < 2.2e-16
+    alternative hypothesis: two-sided
+
+
+
+
+    
+    	Two-sample Kolmogorov-Smirnov test
+    
+    data:  aj_levant %>% as.vector and aj_east_eu %>% as.vector
+    D = 0.57143, p-value = 4.663e-14
+    alternative hypothesis: two-sided
+
+
+### Plotting a heatmap with HCA for IBD between 52 NJ populations and 12 AJ communities
+
+```R
+options(repr.plot.width=14, repr.plot.height=11)
+par(cex.main=1.2)
+
+dend_pops <- all_pops_ibd_mt %>% dist %>% hclust(method="ward.D2") %>% as.dendrogram %>% color_branches(k=8)
+  
+color_func <- colorspace::sequential_hcl(36, "Inferno") # Or "Reds" or "Inferno" ?
+      
+gplots::heatmap.2(as.matrix(all_pops_ibd_mt), key=FALSE, 
+        #main = paste("Ward's HClust for IBD of 52 NJ and 12 AJ populations"),
+        srtCol = 45, 
+        dendrogram = "both",
+        Rowv = rev(dend_pops),
+        Colv = dend_pops,
+        trace="none",          
+        margins =c(7,13),      
+        key.xlab = "Mean pairwise IBD length(cM)",
+        labCol = str_replace(combined_pops_N_new, "\\s\\(N=[0-9]+\\)", ''),
+        labRow = combined_pops_N_new,
+        colRow=c(rep("red", 12), nj_labels_color),
+        colCol=c(rep("red", 12), nj_labels_color),
+        denscol = "grey",
+        density.info = "density",
+        col = rev(color_func))
+```
+
+
+![png](README_files/README_63_0.png)
+
+
+### Ref to handle dendrogram: https://cran.r-project.org/web/packages/dendextend/vignettes/dendextend.html
+
+
+
+<a name="nj-each-aj-ibd"></a>
+### Plotting a heatmap with HCA for IBD between 52 NJ populations and each AJ community
+
+### Ref to handle dendrogram: https://cran.r-project.org/web/packages/dendextend/vignettes/dendextend.html
+
+
+```R
+dend_pops_without_nearest_njs <- function(ibd_mt, dend_pops, aj_pop, color_k) {
+    ## First, use which(aj_pop) to search the node index of the AJ leave
+    dend_nodes_labels <- dend_pops %>% get_nodes_attr("label")
+    dend_leaves_labels <- dend_pops %>% get_leaves_attr("label")
+    aj_node_ind <- which(dend_nodes_labels == aj_pop)
+    aj_leave_ind <- which(dend_leaves_labels == aj_pop)
+    ## second, get the number of leaves for all nodes
+    dend_nodes_members <- dend_pops %>% get_nodes_attr("members")
+    ## the number of leaves of AJ's parent node minus one is equal to N of the nearest NJ cluster
+    nearest_nj_pops_N <- dend_nodes_members[aj_node_ind-1]-1
+    nearest_nj_pops <- dend_leaves_labels[(aj_leave_ind+1):(aj_leave_ind+nearest_nj_pops_N)]
+    print(nearest_nj_pops)
+    truncated_nj_pops <- colnames(ibd_mt)[!(colnames(ibd_mt) %in% c(aj_pop, nearest_nj_pops))]
+    truncated_pops <- c(aj_pop, truncated_nj_pops)
+    truncated_ibd_mt <- ibd_mt[truncated_pops, truncated_pops]
+    truncated_dend <- truncated_ibd_mt %>% dist %>% hclust(method="ward.D2") %>% as.dendrogram %>% color_branches(k=color_k)
+    new_dend_nodes_labels <- truncated_dend %>% get_nodes_attr("label")
+    new_dend_leaves_labels <- truncated_dend %>% get_leaves_attr("label")
+    new_aj_node_ind <- which(new_dend_nodes_labels == aj_pop)
+    new_aj_leave_ind <- which(new_dend_leaves_labels == aj_pop)
+    ## second, get the number of leaves for all nodes
+    new_dend_nodes_members <- truncated_dend %>% get_nodes_attr("members")
+    ## the number of leaves of AJ's parent node minus one is equal to N of the nearest NJ cluster
+    new_nearest_nj_pops_N <- new_dend_nodes_members[new_aj_node_ind-1]-1
+    new_nearest_nj_pops <- new_dend_leaves_labels[(new_aj_leave_ind+1):(new_aj_leave_ind+new_nearest_nj_pops_N)]
+    print(new_nearest_nj_pops)
+    return(list(truncated_ibd_mt, truncated_dend, truncated_pops))
+} 
+```
+
+```R
+for (aj_pop in typical_aj_pops){
+    
+  new_combined_pops <- c(aj_pop, updated_nj_pops)
+  AJ_row_pop_N <- combined_pops_N_new[which(aj_pop == typical_aj_pops)]
+  new_row_pop_N <- c(AJ_row_pop_N, updated_nj_pops_N_new)
+    
+  selected_pops_ibd_mt <- all_pops_ibd_mt[new_combined_pops, new_combined_pops]
+  options(repr.plot.width=14, repr.plot.height=11)
+  par(cex.main=1.2)
+
+  dend_pops <- selected_pops_ibd_mt %>% dist %>% hclust(method="ward.D2") %>% as.dendrogram %>% color_branches(k=8) 
+
+  color_func <- colorspace::sequential_hcl(36, "Inferno") # Or "Reds" or "Inferno" ?
+  
+  new_pops_name <- gsub("Turkish_", "Turk_", new_combined_pops)
+  
+  gplots::heatmap.2(as.matrix(selected_pops_ibd_mt), key=FALSE, 
+          main = paste("HCA (Ward's method) for IBD of 52 NJ populations &", aj_pop, sep=" "),
+          srtCol = 45, 
+          dendrogram = "both",
+          Rowv = rev(dend_pops),
+          Colv = dend_pops,
+          trace="none",          
+          margins =c(7,13),      
+          key.xlab = "Mean pairwise IBD length(cM)",
+          labCol = str_replace(new_row_pop_N, "\\s\\(N=[0-9]+\\)", ''),
+          colRow = c("red", nj_labels_color),
+          labRow = new_row_pop_N,
+          colCol = c("red", nj_labels_color),
+          denscol = "grey",
+          density.info = "density",
+          col = rev(color_func))
+  #dev.off()
+  for (extra_i in 1:3) {
+      color_k <- 8-ceiling(extra_i/1.5)
+      truncated_list <- dend_pops_without_nearest_njs(selected_pops_ibd_mt, dend_pops, aj_pop, color_k)
+      selected_pops_ibd_mt <- truncated_list[[1]] 
+      dend_pops <- truncated_list[[2]]
+      dend_pops_name <- truncated_list[[3]]
+      gplots::heatmap.2(as.matrix(selected_pops_ibd_mt), key=FALSE, 
+          main = paste("HCA (Ward's method) for IBD of NJs &", aj_pop, "post truncation round", 
+                       extra_i, sep=" "),
+          srtCol = 45, 
+          dendrogram = "both",
+          Rowv = rev(dend_pops),
+          Colv = dend_pops,
+          trace="none",          
+          margins =c(7,13),      
+          key.xlab = "Mean pairwise IBD length(cM)",
+          labCol = dend_pops_name,
+          colRow = "red",
+          labRow = dend_pops_name,
+          colCol = "red",
+          denscol = "grey",
+          density.info = "density",
+          col = rev(color_func))
+  }
+}
+```
+
+     [1] "Turkish_south"       "Turkish_central"     "Turkish_mixed"      
+     [4] "Caucasian_northeast" "Turk_northeast"      "Druze"              
+     [7] "Adygei"              "Georgian"            "Maltese"            
+    [10] "Armenian"            "Turkish_west"       
+    [1] "Iranian_gulf"          "Saudi-Bedouin"         "Syrian"               
+    [4] "Kurd"                  "Assyrian"              "Palestinian-Jordanian"
+    [7] "Azeri"                 "Iranian"               "Lebanese"             
+
+
+
+![png](README_files/README_67_1.png)
+
+
+    [1] "Iranian_gulf"          "Saudi-Bedouin"         "Syrian"               
+    [4] "Kurd"                  "Assyrian"              "Palestinian-Jordanian"
+    [7] "Azeri"                 "Iranian"               "Lebanese"             
+     [1] "Mordovian"              "Russian"                "Lithuanian-Latvian"    
+     [4] "Czech"                  "Finn-Estonian"          "French"                
+     [7] "Hungarian"              "Russian_nordic"         "Chuvash-Tatar_Volga"   
+    [10] "Pole-Ukrainian_north"   "Swede-Norwegian-German" "Greek"                 
+    [13] "Spanish"                "Bulgarian"              "Icelandic"             
+    [16] "Brit"                   "Belarusian"             "Ukrainian"             
+    [19] "Croatian"               "Basque-Spanish_north"   "Albanian"              
+    [22] "Sardinian"              "French_south"           "Romanian-Moldavian"    
+    [25] "Italian_north"          "Italian_central_south" 
+
+
+
+![png](README_files/README_67_3.png)
+
+
+     [1] "Mordovian"              "Russian"                "Lithuanian-Latvian"    
+     [4] "Czech"                  "Finn-Estonian"          "French"                
+     [7] "Hungarian"              "Russian_nordic"         "Chuvash-Tatar_Volga"   
+    [10] "Pole-Ukrainian_north"   "Swede-Norwegian-German" "Greek"                 
+    [13] "Spanish"                "Bulgarian"              "Icelandic"             
+    [16] "Brit"                   "Belarusian"             "Ukrainian"             
+    [19] "Croatian"               "Basque-Spanish_north"   "Albanian"              
+    [22] "Sardinian"              "French_south"           "Romanian-Moldavian"    
+    [25] "Italian_north"          "Italian_central_south" 
+    [1] "Egyptian"          "NorthAfrican_west" "Pathan"           
+    [4] "Turkmen-Uzbek"     "Bashkir"           "Tatar_Siberian"   
+
+
+
+![png](README_files/README_67_5.png)
+
+
+
+![png](README_files/README_67_6.png)
+
+
+    [1] "Maltese"
+    [1] "Turk_northeast"
+
+
+
+![png](README_files/README_67_8.png)
+
+
+    [1] "Turk_northeast"
+     [1] "Sardinian"             "Italian_north"         "Italian_central_south"
+     [4] "Albanian"              "Croatian"              "Czech"                
+     [7] "French"                "Hungarian"             "Brit"                 
+    [10] "Romanian-Moldavian"    "French_south"          "Basque-Spanish_north" 
+
+
+
+![png](README_files/README_67_10.png)
+
+
+     [1] "Sardinian"             "Italian_north"         "Italian_central_south"
+     [4] "Albanian"              "Croatian"              "Czech"                
+     [7] "French"                "Hungarian"             "Brit"                 
+    [10] "Romanian-Moldavian"    "French_south"          "Basque-Spanish_north" 
+    [1] "Turkish_central"     "Turkish_south"       "Armenian"           
+    [4] "Druze"               "Adygei"              "Georgian"           
+    [7] "Turkish_west"        "Turkish_mixed"       "Caucasian_northeast"
+
+
+
+![png](README_files/README_67_12.png)
+
+
+
+![png](README_files/README_67_13.png)
+
+
+    [1] "Turk_northeast"
+    [1] "Italian_north"         "Italian_central_south" "Brit"                 
+    [4] "Romanian-Moldavian"    "French_south"          "Basque-Spanish_north" 
+    [7] "Albanian"              "Sardinian"            
+
+
+
+![png](README_files/README_67_15.png)
+
+
+    [1] "Italian_north"         "Italian_central_south" "Brit"                 
+    [4] "Romanian-Moldavian"    "French_south"          "Basque-Spanish_north" 
+    [7] "Albanian"              "Sardinian"            
+     [1] "Greek"                  "Spanish"                "Croatian"              
+     [4] "Czech"                  "French"                 "Hungarian"             
+     [7] "Swede-Norwegian-German" "Russian_nordic"         "Chuvash-Tatar_Volga"   
+    [10] "Pole-Ukrainian_north"   "Lithuanian-Latvian"     "Finn-Estonian"         
+    [13] "Mordovian"              "Russian"               
+
+
+
+![png](README_files/README_67_17.png)
+
+
+     [1] "Greek"                  "Spanish"                "Croatian"              
+     [4] "Czech"                  "French"                 "Hungarian"             
+     [7] "Swede-Norwegian-German" "Russian_nordic"         "Chuvash-Tatar_Volga"   
+    [10] "Pole-Ukrainian_north"   "Lithuanian-Latvian"     "Finn-Estonian"         
+    [13] "Mordovian"              "Russian"               
+    [1] "Bulgarian"
+
+
+
+![png](README_files/README_67_19.png)
+
+
+
+![png](README_files/README_67_20.png)
+
+
+    [1] "Turk_northeast"
+     [1] "Maltese"             "Turkish_west"        "Druze"              
+     [4] "Adygei"              "Georgian"            "Armenian"           
+     [7] "Turkish_south"       "Turkish_central"     "Turkish_mixed"      
+    [10] "Caucasian_northeast"
+
+
+
+![png](README_files/README_67_22.png)
+
+
+     [1] "Maltese"             "Turkish_west"        "Druze"              
+     [4] "Adygei"              "Georgian"            "Armenian"           
+     [7] "Turkish_south"       "Turkish_central"     "Turkish_mixed"      
+    [10] "Caucasian_northeast"
+     [1] "Russian_nordic"         "Chuvash-Tatar_Volga"    "French"                
+     [4] "Hungarian"              "Mordovian"              "Russian"               
+     [7] "Lithuanian-Latvian"     "Finn-Estonian"          "Swede-Norwegian-German"
+    [10] "Greek"                  "Spanish"                "Czech"                 
+    [13] "Pole-Ukrainian_north"  
+
+
+
+![png](README_files/README_67_24.png)
+
+
+     [1] "Russian_nordic"         "Chuvash-Tatar_Volga"    "French"                
+     [4] "Hungarian"              "Mordovian"              "Russian"               
+     [7] "Lithuanian-Latvian"     "Finn-Estonian"          "Swede-Norwegian-German"
+    [10] "Greek"                  "Spanish"                "Czech"                 
+    [13] "Pole-Ukrainian_north"  
+     [1] "Croatian"              "Basque-Spanish_north"  "Belarusian"           
+     [4] "Ukrainian"             "Icelandic"             "Brit"                 
+     [7] "Bulgarian"             "Albanian"              "French_south"         
+    [10] "Romanian-Moldavian"    "Sardinian"             "Italian_north"        
+    [13] "Italian_central_south"
+
+
+
+![png](README_files/README_67_26.png)
+
+
+
+![png](README_files/README_67_27.png)
+
+
+     [1] "Turk_northeast"      "Maltese"             "Turkish_central"    
+     [4] "Armenian"            "Turkish_south"       "Turkish_west"       
+     [7] "Turkish_mixed"       "Caucasian_northeast" "Druze"              
+    [10] "Adygei"              "Georgian"           
+     [1] "Russian_nordic"         "Chuvash-Tatar_Volga"    "Albanian"              
+     [4] "Lithuanian-Latvian"     "Mordovian"              "Russian"               
+     [7] "Czech"                  "Finn-Estonian"          "Greek"                 
+    [10] "Spanish"                "Swede-Norwegian-German" "Pole-Ukrainian_north"  
+
+
+
+![png](README_files/README_67_29.png)
+
+
+     [1] "Russian_nordic"         "Chuvash-Tatar_Volga"    "Albanian"              
+     [4] "Lithuanian-Latvian"     "Mordovian"              "Russian"               
+     [7] "Czech"                  "Finn-Estonian"          "Greek"                 
+    [10] "Spanish"                "Swede-Norwegian-German" "Pole-Ukrainian_north"  
+     [1] "Basque-Spanish_north"  "Sardinian"             "Italian_north"        
+     [4] "Italian_central_south" "Bulgarian"             "French_south"         
+     [7] "Icelandic"             "Belarusian"            "Croatian"             
+    [10] "Ukrainian"             "Brit"                  "Romanian-Moldavian"   
+    [13] "French"                "Hungarian"            
+
+
+
+![png](README_files/README_67_31.png)
+
+
+     [1] "Basque-Spanish_north"  "Sardinian"             "Italian_north"        
+     [4] "Italian_central_south" "Bulgarian"             "French_south"         
+     [7] "Icelandic"             "Belarusian"            "Croatian"             
+    [10] "Ukrainian"             "Brit"                  "Romanian-Moldavian"   
+    [13] "French"                "Hungarian"            
+    [1] "Syrian"                "Iranian_gulf"          "Kurd"                 
+    [4] "Assyrian"              "Palestinian-Jordanian" "Lebanese"             
+    [7] "Azeri"                 "Iranian"              
+
+
+
+![png](README_files/README_67_33.png)
+
+
+
+![png](README_files/README_67_34.png)
+
+
+    [1] "Greek"   "Spanish"
+    [1] "Turk_northeast"
+
+
+
+![png](README_files/README_67_36.png)
+
+
+    [1] "Turk_northeast"
+    [1] "Sardinian"
+
+
+
+![png](README_files/README_67_38.png)
+
+
+    [1] "Sardinian"
+    [1] "Italian_north"         "Italian_central_south" "Brit"                 
+    [4] "Romanian-Moldavian"    "French_south"          "Basque-Spanish_north" 
+    [7] "Czech"                 "French"                "Hungarian"            
+
+
+
+![png](README_files/README_67_40.png)
+
+
+
+![png](README_files/README_67_41.png)
+
+
+    [1] "Greek"   "Spanish"
+    [1] "Turk_northeast"
+
+
+
+![png](README_files/README_67_43.png)
+
+
+    [1] "Turk_northeast"
+    [1] "Italian_north"         "Italian_central_south"
+
+
+
+![png](README_files/README_67_45.png)
+
+
+    [1] "Italian_north"         "Italian_central_south"
+    [1] "Basque-Spanish_north"
+
+
+
+![png](README_files/README_67_47.png)
+
+
+
+![png](README_files/README_67_48.png)
+
+
+    [1] "Greek"   "Spanish"
+    [1] "Turk_northeast"
+
+
+
+![png](README_files/README_67_50.png)
+
+
+    [1] "Turk_northeast"
+    [1] "Turkish_west" "Adygei"       "Georgian"    
+
+
+
+![png](README_files/README_67_52.png)
+
+
+    [1] "Turkish_west" "Adygei"       "Georgian"    
+    [1] "Sardinian"
+
+
+
+![png](README_files/README_67_54.png)
+
+
+
+![png](README_files/README_67_55.png)
+
+
+    [1] "Italian_north"         "Italian_central_south"
+    [1] "Sardinian"
+
+
+
+![png](README_files/README_67_57.png)
+
+
+    [1] "Sardinian"
+    [1] "Swede-Norwegian-German" "Greek"                  "Spanish"               
+
+
+
+![png](README_files/README_67_59.png)
+
+
+    [1] "Swede-Norwegian-German" "Greek"                  "Spanish"               
+    [1] "French_south"         "Basque-Spanish_north"
+
+
+
+![png](README_files/README_67_61.png)
+
+
+
+![png](README_files/README_67_62.png)
+
+
+    [1] "Greek"   "Spanish"
+    [1] "Turk_northeast"
+
+
+
+![png](README_files/README_67_64.png)
+
+
+    [1] "Turk_northeast"
+    [1] "Sardinian"
+
+
+
+![png](README_files/README_67_66.png)
+
+
+    [1] "Sardinian"
+    [1] "Croatian"
+
+
+
+![png](README_files/README_67_68.png)
+
+
+
+![png](README_files/README_67_69.png)
+
+
+    [1] "Greek"   "Spanish"
+    [1] "Croatian"
+
+
+
+![png](README_files/README_67_71.png)
+
+
+    [1] "Croatian"
+    [1] "Romanian-Moldavian"   "Czech"                "French"              
+    [4] "Hungarian"            "French_south"         "Basque-Spanish_north"
+
+
+
+![png](README_files/README_67_73.png)
+
+
+    [1] "Romanian-Moldavian"   "Czech"                "French"              
+    [4] "Hungarian"            "French_south"         "Basque-Spanish_north"
+    [1] "Albanian"              "Sardinian"             "Italian_north"        
+    [4] "Italian_central_south"
+
+
+
+![png](README_files/README_67_75.png)
+
+
+
+![png](README_files/README_67_76.png)
+
+
+    [1] "Turk_northeast"
+    [1] "Maltese"      "Turkish_west"
+
+
+
+![png](README_files/README_67_78.png)
+
+
+    [1] "Maltese"      "Turkish_west"
+    [1] "Druze"               "Adygei"              "Georgian"           
+    [4] "Armenian"            "Turkish_south"       "Turkish_central"    
+    [7] "Turkish_mixed"       "Caucasian_northeast"
+
+
+
+![png](README_files/README_67_80.png)
+
+
+    [1] "Druze"               "Adygei"              "Georgian"           
+    [4] "Armenian"            "Turkish_south"       "Turkish_central"    
+    [7] "Turkish_mixed"       "Caucasian_northeast"
+    [1] "Albanian"              "French_south"          "Basque-Spanish_north" 
+    [4] "Sardinian"             "Italian_north"         "Italian_central_south"
+
+
+
+![png](README_files/README_67_82.png)
+
+
+
+![png](README_files/README_67_83.png)
+
+
+### An extra script to plot all NJ populations, and closest NJ populations with each AJ community at map
+<a name="nj-map"></a>
+```R
+###################################
+# Use "ls -l /Library/Frameworks/R.framework/Versions/" to check all available local R versions 
+###################################
+## Ref1: https://soprasteriaanalytics.se/2018/08/15/visualization-of-data-with-maps/
+## Ref2 (lat & long with background): https://ourcodingclub.github.io/tutorials/maps/
+### Install necessary dependencies and packages 
+install.packages(c("cowplot", "googleway", "ggplot2", "ggrepel", "devtools", "tidyverse", 
+                   "dplyr", "ggrepel"), dependencies = TRUE)
+
+## Use devtools to install raster and usethis as dependency for raster
+require(devtools)
+install_github("r-lib/usethis")
+install_github('AndySouth/rworldmap',build_vignettes=TRUE) 
+install_github("rspatial/raster")
+## "configure.args" is specific for MacOS", " see "https://github.com/r-spatial/sf" for ref
+install_github("r-spatial/sf", configure.args = "--with-proj-lib=/usr/local/lib/")
+install_github("r-spatial/classInt")
+install_github("oswaldosantos/ggsn")
+
+## import libraries
+library(ggplot2)
+library(ggrepel)
+library(tidyr)
+library(plyr)
+## dplyr enables pipe syntax i.e. "%>%"
+library(dplyr)
+library(tidyverse)
+library(rworldmap)
+library(raster)
+library(rgdal)
+library(sf)
+library(ggsn)
+library(classInt)
+
+world <- getMap(resolution = "less")
+# Call the vector in `borders()`
+#world_to_show <- world[world@data$ADMIN %in% countries_to_show, ]
+
+NJ_pop_coords <- read.csv("../Jews_Genetics_Project/NJ_pops_coord.csv")
+NJ_pop_coords$pop <- NJ_pop_coords$pop %>% as.character
+str(NJ_pop_coords)
+NJ_merged_list <- read.csv("../Jews_Genetics_Project/NJ_merged_list.csv")
+closest_njs_with_aj <- read.csv("../Jews_Genetics_Project/AJ_closest_nodes.csv") 
+head(NJ_pop_coords)
+head(NJ_merged_list)
+head(closest_njs_with_aj)
+
+aj_countries <- closest_njs_with_aj$aj_country %>% unique %>% as.character
+aj_countries %>% str
+nj_pops_with_coord <- NJ_pop_coords$pop %>% unique %>% as.character
+
+for (country in aj_countries) {
+clustered_nj_with_round <- filter(closest_njs_with_aj, aj_country==country)[c('nj_pop', 'round')]
+clustered_njs <- clustered_nj_with_round$nj_pop %>% as.character
+clustered_nj_colname <- c("nj_pop", "lat", "long", "round")
+clustered_nj_df <- data.frame(matrix(, ncol=length(clustered_nj_colname), nrow = 0))
+colnames(clustered_nj_df) <- clustered_nj_colname
+  for (clustered_nj in clustered_njs) {
+    if (clustered_nj %in% nj_pops_with_coord) {
+      nj_pop_with_coord <- NJ_pop_coords %>% filter(pop==clustered_nj)
+      nj_pop_round <- filter(clustered_nj_with_round, nj_pop==clustered_nj)$round
+      nj_pop_with_coord <- c(nj_pop_with_coord, nj_pop_round)
+      clustered_nj_df[nrow(clustered_nj_df)+1,] <- nj_pop_with_coord
+    } else {
+      mapped_nj_pops <- filter(NJ_merged_list, merged_nj==clustered_nj)$nj
+      mapped_nj_pops_with_coord <- NJ_pop_coords %>% filter(pop %in% mapped_nj_pops)
+      mapped_nj_pop_round <- filter(clustered_nj_with_round, nj_pop==clustered_nj)$round
+      for (i in 1:nrow(mapped_nj_pops_with_coord)) {
+        mapped_nj_pop_with_coord <- mapped_nj_pops_with_coord[i,]
+        mapped_nj_pop_with_coord <- c(mapped_nj_pop_with_coord, mapped_nj_pop_round)
+        clustered_nj_df[nrow(clustered_nj_df)+1,] <- mapped_nj_pop_with_coord 
+      }
+    }
+  }
+  ggplot() +
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               fill = "lightyellow", colour = "darkgrey") +
+  geom_label(data=clustered_nj_df, size=1,
+             aes(x = long, y = lat, label=nj_pop, fill = round), 
+             colour = "white") +
+  scale_radius(range = c(3,6)) +
+  scale_colour_discrete(l = 100) +
+  coord_quickmap() + 
+  xlim(-14, 63.5) +  # Set x axis limits, xlim(min, max)
+  ylim(20, 70) +  # Set y axis limits
+  theme_classic() +  # Remove ugly grey background
+  ggtitle(paste("Non-Jews clustering with AJs from", country, "after N rounds of truncation", sep=" ")) +
+  xlab("Longitude") +
+  ylab("Latitude")
+  ggsave(paste(country, "AJ_HC_ward_map.png", sep=""))
+}
+
+## plot the coords of all non-Jews in the study
+ggplot() +
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               fill = "lightyellow", colour = "darkgrey") +
+  geom_point(data=NJ_pop_coords, aes(x = long, y = lat, label = pop), 
+             color="red", size=3) +
+  geom_text_repel(
+    data=NJ_pop_coords, aes(x = long, y = lat, label = pop),
+    nudge_x = .15,
+    box.padding = 0.6,
+    nudge_y = 1,
+    segment.curvature = -0.1,
+    segment.ncp = 3,
+    segment.angle = 20,
+    check_overlap = FALSE, 
+    color="#993333", fontface="bold", size=4) +
+  scale_radius(range = c(3,6)) +
+  scale_colour_discrete(l = 100) +
+  coord_quickmap(xlim=c(-19, 67.5), ylim=c(26, 63), clip = "on") + 
+  theme_classic() +  # Remove ugly grey background
+  ggtitle("Non-Jewish populations included in IBD inference at this study") +
+  xlab("Longitude") +
+  ylab("Latitude") +
+  theme(
+    panel.background = element_rect(fill = "#ADD8E6"),
+    plot.title = element_text(color="#993333", size=14, face="bold"),
+    axis.title.x = element_text(color="#993333", size=14, face="bold"),
+    axis.title.y = element_text(color="#993333", size=14, face="bold"))
+ggsave("NJ_pops_map.png")
+```
+
+![png](README_files/NJ_pops_map.png)
+
+
+<a name="sec6"></a>
+# Section VI: Preprocessing in Python, Plotting and Hierarchical Clustering analyses in R for GPS predictions
+
+<a name="to-shore"></a>
+## Relocalize each AJ predicted to sea by GPS to the nearest shore in Python
+### Result of GPS predictions is available at <code>../Jews_Genetics_Project/GPS_results_filtered_722_Jews.csv</code>
+
+```bash
+%%bash
+conda install -y geopandas shapely descartes > /dev/null 2>&1
+```
+
+
+```python
+import geopandas
+import pandas as pd
+from shapely.geometry import Point
+from shapely.ops import nearest_points, unary_union
+import numpy as np
+import matplotlib
+```
+
+### **The Main Function:**
+
+The nearest land function takes two parameters: water_body and world_map (dataset of all lands on the planet). 
+
+First, it calculates the distances between the water body and the polygons in the dataset and save them in a numpy array.
+
+Second, it uses a while loop and a buffer to locate the closest point. Buffering is the process of measuring distances away from an object.
+
+Next, it looks to see if the circle intersects with the land ;If there is no intersection, it adds 0.0001 to the radious and tries again.
+
+Finally, It returns the location of the land's centroid.
+
+
+
+```python
+def nearest_land(water_body, world_map):
+    # finding the nearest polygon
+    # world_map.shape[0] refers to the number of available countries in the df "world_map"
+    poly_distances = np.zeros(world_map.shape[0])
+    for i in range(world.shape[0]):
+        poly_distances[i] = water_body.distance(world_map.loc[i].geometry)
+    water_body_offset = 0
+    nearest_poly = world_map.loc[poly_distances.argmin()]
+    while True:
+        water_body_offset += 0.0001
+        the_buffer = water_body.buffer(poly_distances.min()+water_body_offset)
+        land = nearest_poly.geometry.intersection(the_buffer)
+        if not land.is_empty:
+            break
+    land = land.centroid
+    return {'geopoint': land, 'geopoly': nearest_poly, 'lat': land.y, 'long': land.x}
+
+
+world = geopandas.read_file(geopandas.datasets.get_path('naturalearth_lowres'))
+
+def plot_water_body_land(water_body, land, poly):
+    df = geopandas.GeoSeries([poly.geometry])
+    df2 = geopandas.GeoSeries([water_body, land])
+    ax = df.plot()
+    df2.plot(ax=ax, color='red', alpha=0.5)
+
+
+filtered_gps_results = pd.read_csv("../Jews_Genetics_Project/GPS_results_filtered_722_Jews.csv")
+```
+
+#### Extract only single-origin AJs
+
+```python
+main_single_ori_ajs = filtered_gps_results.loc[filtered_gps_results['Dataset'].str.endswith('AJ') & \
+                                                        filtered_gps_results['country2_obs'].isna() & \
+                                                        ~filtered_gps_results['country1_obs'].isna()]
+countries_to_exclude = ['Italy', 'France', "Slovakia", "Moldova"]
+main_single_ori_ajs = main_single_ori_ajs.loc[~filtered_gps_results['country1_obs'].isin(countries_to_exclude)]
+main_single_ori_ajs
+main_aj_indiv_index = main_single_ori_ajs.index
+
+num_relocated_dots=0
+pred_ctry_count = {}
+Turkey_aj_lat_long = []
+print(len(main_aj_indiv_index))
+
+def get_west_east_most_aj(lat_long_list: list):
+    long_list = [el[1] for el in lat_long_list]
+    west_most_el_ind = long_list.index(min(long_list))
+    east_most_el_ind = long_list.index(max(long_list))
+    return (lat_long_list[west_most_el_ind], lat_long_list[east_most_el_ind])
+
+for ind in main_aj_indiv_index: 
+    long_pred = round(float(str(main_single_ori_ajs.loc[ind, 'Long_pred']).replace(",", ".")), 4)
+    lat_pred = round(float(str(main_single_ori_ajs.loc[ind, 'Lat_pred']).replace(",", ".")), 4)
+    geo_point = Point(long_pred, lat_pred)
+    nearest_shore = nearest_land(geo_point, world)
+    nearest_shore_lat = round(nearest_shore['lat'], 4)
+    nearest_shore_long = round(nearest_shore['long'], 4)
+    pred_ctry = nearest_shore['geopoly']['name']  
+    if (long_pred==nearest_shore_long and lat_pred==nearest_shore_lat): 
+        if pred_ctry == 'Turkey': Turkey_aj_lat_long.append((lat_pred, long_pred))
+        pred_ctry_count[pred_ctry]=1 if pred_ctry not in pred_ctry_count else pred_ctry_count[pred_ctry]+1
+    else:
+        num_relocated_dots+=1
+        sea_key = f'blacksea-{pred_ctry}'
+        pred_ctry_count[sea_key]=1 if sea_key not in pred_ctry_count else pred_ctry_count[sea_key]+1
+    main_single_ori_ajs.loc[ind, 'Lat_pred'] = nearest_shore_lat
+    main_single_ori_ajs.loc[ind, 'Long_pred'] = nearest_shore_long
+print(num_relocated_dots)
+print(pred_ctry_count)
+print(sum(pred_ctry_count.values()))
+print(get_west_east_most_aj(Turkey_aj_lat_long))
+## print df to a csv
+main_single_ori_ajs.to_csv("285_main_aj_nearest_shore.csv")
+```
+
+    285
+    67
+    {'blacksea-Turkey': 63, 'Turkey': 198, 'Bulgaria': 5, 'Armenia': 4, 'Romania': 2, 'Syria': 6, 'Palestine': 1, 'blacksea-Romania': 4, 'Ukraine': 2}
+    285
+    ((41.3424, 35.1287), (39.8445, 44.4184))
+
+
+#### According to Google map, the westmost AJ was predicted to <code>Samsun</code> province of Turkey, and the eastmost AJ was predicted to <code>Igdir</code> province of Turkey
+
+
+<a name="gps-analyses"></a>
+## Plotting and HCA for GPS predictions in R
+### Result of GPS predictions is available at <code>../Jews_Genetics_Project/GPS_results_filtered_722_Jews.csv</code> and <code>285_main_aj_nearest_shore.csv</code>
+
+
+```R
+gps_results <- read.csv("../Jews_Genetics_Project/GPS_results_filtered_722_Jews.csv")
+gps_known_single_ori_results <- filter(gps_results, city1_obs!='', city2_obs=='')
+gps_single_ori_aj_results <- filter(gps_known_single_ori_results, country1_obs %in% all_aj_countries)
+gps_single_ori_aj_results$Lat_pred <- gps_single_ori_aj_results$Lat_pred %>% as.character
+gps_single_ori_aj_results$Long_pred <- gps_single_ori_aj_results$Long_pred %>% as.character
+
+gps_single_ori_aj_results$Lat_pred <- sub(",", ".", gps_single_ori_aj_results$Lat_pred)
+gps_single_ori_aj_results$Long_pred <- sub(",", ".", gps_single_ori_aj_results$Long_pred)
+
+gps_single_ori_aj_results$Lat_pred <- gps_single_ori_aj_results$Lat_pred %>% as.numeric
+gps_single_ori_aj_results$Long_pred <- gps_single_ori_aj_results$Long_pred %>% as.numeric
+gps_single_ori_aj_results[c('Lat_pred', 'Long_pred')] %>% head %>% print 
+```
+
+### Steps:
+#### 1. Calculate the mean longitude and latitude within each subgroup (German AJs, Polish AJs, Russian AJs etc)
+#### 2. Calculate the euclidean distance between each pair of AJ subgroups. Then I would have a symmetric 12*12 matrix.
+#### 3. Plot a heatmap to visualize the 12*12 matrix. The closer euclidean distances are, the darker should colors at the heatmap be.
+#### 4. Perform hierarchical clustering using Ward's method for 12 AJ communities, as what Fast and Robust Identity-by-Descent Inference with the Templated Positional Burrows?Wheeler Transform, WA Freyman et. al., 2020 did in its case study for single-state origin Mexican populations.
+
+
+```R
+## Step 1
+aj_pop_mean_coord <- data.frame(matrix(ncol = 2, nrow = 0))
+geo_cols <- c("mean_lat", "mean_long")
+colnames(aj_pop_mean_coord) <- geo_cols
+all_aj_countries_with_size <- c()
+for (country in all_aj_countries) {
+  aj_group_lat <- filter(gps_single_ori_aj_results, country1_obs==country)$Lat_pred
+  mean_lat_pred <- mean(aj_group_lat, trim = 0, na.rm = TRUE)
+  country_with_size <- paste(sep='', "(N=", as.character(length(aj_group_lat)), ")")
+  all_aj_countries_with_size <- c(all_aj_countries_with_size, paste(sep=' ', country, country_with_size))
+  aj_group_long <- filter(gps_single_ori_aj_results, country1_obs==country)$Long_pred
+  mean_long_pred <- mean(aj_group_long, trim = 0, na.rm = TRUE)
+  country_row <- data.frame(matrix(ncol = 2, nrow = 1))
+  rownames(country_row) <- c(country)
+  colnames(country_row) <- c("mean_lat", "mean_long")
+  country_row[1, 'mean_lat'] <- mean_lat_pred
+  country_row[1, 'mean_long'] <- mean_long_pred
+  aj_pop_mean_coord <- rbind(aj_pop_mean_coord, country_row)
+}
+aj_pop_mean_coord
+all_aj_countries_with_size
+```
+
+
+<table>
+<thead><tr><th></th><th scope=col>mean_lat</th><th scope=col>mean_long</th></tr></thead>
+<tbody>
+	<tr><th scope=row>Netherlands</th><td>41.62875</td><td>31.97443</td></tr>
+	<tr><th scope=row>Germany</th><td>38.36207</td><td>38.61385</td></tr>
+	<tr><th scope=row>Czechia</th><td>39.74784</td><td>38.51142</td></tr>
+	<tr><th scope=row>Latvia</th><td>39.09586</td><td>37.66846</td></tr>
+	<tr><th scope=row>Austria</th><td>39.15726</td><td>36.62836</td></tr>
+	<tr><th scope=row>Poland</th><td>40.42739</td><td>37.24533</td></tr>
+	<tr><th scope=row>Ukraine</th><td>40.69320</td><td>36.80421</td></tr>
+	<tr><th scope=row>Russia</th><td>40.69452</td><td>38.47723</td></tr>
+	<tr><th scope=row>Lithuania</th><td>40.68564</td><td>37.55811</td></tr>
+	<tr><th scope=row>Hungary</th><td>40.19954</td><td>37.07923</td></tr>
+	<tr><th scope=row>Romania</th><td>40.39935</td><td>37.93639</td></tr>
+	<tr><th scope=row>Belarus</th><td>40.98683</td><td>37.46784</td></tr>
+</tbody>
+</table>
+
+
+
+
+<ol class=list-inline>
+	<li>'Netherlands (N=4)'</li>
+	<li>'Germany (N=26)'</li>
+	<li>'Czechia (N=13)'</li>
+	<li>'Latvia (N=7)'</li>
+	<li>'Austria (N=5)'</li>
+	<li>'Poland (N=58)'</li>
+	<li>'Ukraine (N=41)'</li>
+	<li>'Russia (N=39)'</li>
+	<li>'Lithuania (N=28)'</li>
+	<li>'Hungary (N=25)'</li>
+	<li>'Romania (N=24)'</li>
+	<li>'Belarus (N=15)'</li>
+</ol>
+
+
+```R
+euclidean <- function(a, b) sqrt(sum((a - b)^2))
+
+main_aj_countries <- all_aj_countries
+
+aj_pop_gps_dis_mt <- data.frame(matrix(, ncol = length(main_aj_countries), nrow = length(main_aj_countries)))
+colnames(aj_pop_gps_dis_mt) <- main_aj_countries
+rownames(aj_pop_gps_dis_mt) <- main_aj_countries
+for (row_country in main_aj_countries){
+    for (col_country in main_aj_countries){
+        ## m[i,i]==0
+        if (row_country == col_country) {
+            aj_pop_gps_dis_mt[row_country, col_country] <- 0
+            next
+        }
+        ## symmetric, i.e. m[i,j]==m[j,i]
+        if (!is.na(aj_pop_gps_dis_mt[col_country, row_country])) {
+            aj_pop_gps_dis_mt[row_country, col_country] <- aj_pop_gps_dis_mt[col_country, row_country]
+            next
+        }
+        row_country_coord <- as.vector(aj_pop_mean_coord[row_country, ])
+        col_country_coord <- as.vector(aj_pop_mean_coord[col_country, ])
+        euc_dis <- euclidean(row_country_coord, col_country_coord)
+        aj_pop_gps_dis_mt[row_country, col_country] <- euc_dis
+    }
+}
+aj_pop_gps_dis_mt
+```
+
+
+<table>
+<thead><tr><th></th><th scope=col>Netherlands</th><th scope=col>Germany</th><th scope=col>Czechia</th><th scope=col>Latvia</th><th scope=col>Austria</th><th scope=col>Poland</th><th scope=col>Ukraine</th><th scope=col>Russia</th><th scope=col>Lithuania</th><th scope=col>Hungary</th><th scope=col>Romania</th><th scope=col>Belarus</th></tr></thead>
+<tbody>
+	<tr><th scope=row>Netherlands</th><td>0.000000 </td><td>7.399537 </td><td>6.8022108</td><td>6.231978 </td><td>5.269476 </td><td>5.4060839</td><td>4.9195637</td><td>6.5695742</td><td>5.6627706</td><td>5.3010983</td><td>6.0873977</td><td>5.5307932</td></tr>
+	<tr><th scope=row>Germany</th><td>7.399537 </td><td>0.000000 </td><td>1.3895462</td><td>1.196748 </td><td>2.138806 </td><td>2.4775709</td><td>2.9510878</td><td>2.3364424</td><td>2.5521631</td><td>2.3940267</td><td>2.1469676</td><td>2.8640304</td></tr>
+	<tr><th scope=row>Czechia</th><td>6.802211 </td><td>1.389546 </td><td>0.0000000</td><td>1.065673 </td><td>1.973494 </td><td>1.4369239</td><td>1.9514717</td><td>0.9472964</td><td>1.3372585</td><td>1.5017319</td><td>0.8689820</td><td>1.6199202</td></tr>
+	<tr><th scope=row>Latvia</th><td>6.231978 </td><td>1.196748 </td><td>1.0656727</td><td>0.000000 </td><td>1.041908 </td><td>1.3971413</td><td>1.8161520</td><td>1.7916013</td><td>1.5936038</td><td>1.2511258</td><td>1.3307483</td><td>1.9015817</td></tr>
+	<tr><th scope=row>Austria</th><td>5.269476 </td><td>2.138806 </td><td>1.9734945</td><td>1.041908 </td><td>0.000000 </td><td>1.4120467</td><td>1.5459692</td><td>2.4044739</td><td>1.7889556</td><td>1.1356222</td><td>1.8038109</td><td>2.0129682</td></tr>
+	<tr><th scope=row>Poland</th><td>5.406084 </td><td>2.477571 </td><td>1.4369239</td><td>1.397141 </td><td>1.412047 </td><td>0.0000000</td><td>0.5150162</td><td>1.2605310</td><td>0.4056114</td><td>0.2819625</td><td>0.6916231</td><td>0.6020657</td></tr>
+	<tr><th scope=row>Ukraine</th><td>4.919564 </td><td>2.951088 </td><td>1.9514717</td><td>1.816152 </td><td>1.545969 </td><td>0.5150162</td><td>0.0000000</td><td>1.6730217</td><td>0.7539328</td><td>0.5650886</td><td>1.1696852</td><td>0.7256868</td></tr>
+	<tr><th scope=row>Russia</th><td>6.569574 </td><td>2.336442 </td><td>0.9472964</td><td>1.791601 </td><td>2.404474 </td><td>1.2605310</td><td>1.6730217</td><td>0.0000000</td><td>0.9191691</td><td>1.4830435</td><td>0.6161460</td><td>1.0508660</td></tr>
+	<tr><th scope=row>Lithuania</th><td>5.662771 </td><td>2.552163 </td><td>1.3372585</td><td>1.593604 </td><td>1.788956 </td><td>0.4056114</td><td>0.7539328</td><td>0.9191691</td><td>0.0000000</td><td>0.6823565</td><td>0.4743977</td><td>0.3144267</td></tr>
+	<tr><th scope=row>Hungary</th><td>5.301098 </td><td>2.394027 </td><td>1.5017319</td><td>1.251126 </td><td>1.135622 </td><td>0.2819625</td><td>0.5650886</td><td>1.4830435</td><td>0.6823565</td><td>0.0000000</td><td>0.8801401</td><td>0.8779711</td></tr>
+	<tr><th scope=row>Romania</th><td>6.087398 </td><td>2.146968 </td><td>0.8689820</td><td>1.330748 </td><td>1.803811 </td><td>0.6916231</td><td>1.1696852</td><td>0.6161460</td><td>0.4743977</td><td>0.8801401</td><td>0.0000000</td><td>0.7514391</td></tr>
+	<tr><th scope=row>Belarus</th><td>5.530793 </td><td>2.864030 </td><td>1.6199202</td><td>1.901582 </td><td>2.012968 </td><td>0.6020657</td><td>0.7256868</td><td>1.0508660</td><td>0.3144267</td><td>0.8779711</td><td>0.7514391</td><td>0.0000000</td></tr>
+</tbody>
+</table>
+
+
+```R
+dend_pops <- aj_pop_gps_dis_mt %>% dist %>% 
+   hclust(method="ward.D2") %>% as.dendrogram %>% color_branches(k=1)
+
+color_func <- colorspace::sequential_hcl(16, "Inferno") # Or "Reds" or "Inferno" ?
+labels_color <- c('brown', rep('darkred', 4), rep('blue', 7))
+
+#par(cex.lab = 2)
+#par(cex.sub = 2)
+
+gplots::heatmap.2(as.matrix(aj_pop_gps_dis_mt), 
+              main = NA,
+          srtCol = 30, #cexRow=1.5, cexCol=1.5,
+          dendrogram = "both",
+          Rowv = rev(dend_pops),
+          Colv = dend_pops,
+          trace="none",          
+          margins =c(5, 9),      
+          key.xlab = "Community-wise Euclidean distance",
+          labCol = all_aj_countries_with_size,
+          labRow = all_aj_countries_with_size,
+          colRow = labels_color,
+          colCol = labels_color,
+          denscol = "grey",
+          density.info = "density",
+          col = color_func)
+```
+
+![png](README_files/README_18_0.png)
+
+
+
+<a name="aj-gps-map"></a>
+### An extra script to plot biogeographical coordinates predicted by GPS in R
+```R
+install.packages(c("cowplot", "googleway", "ggplot2", "ggrepel", "devtools", "tidyverse", 
+                   "dplyr"), dependencies = TRUE)
+
+## Use devtools to install raster and usethis as dependency for raster
+require(devtools)
+install_github("r-lib/usethis")
+install_github('AndySouth/rworldmap',build_vignettes=TRUE) 
+install_github("rspatial/raster")
+## "configure.args" is specific for MacOS", " see "https://github.com/r-spatial/sf" for ref
+install_github("r-spatial/sf", configure.args = "--with-proj-lib=/usr/local/lib/")
+install_github("r-spatial/classInt")
+install_github("oswaldosantos/ggsn")
+
+## import libraries
+library(ggplot2)
+library(tidyr)
+library(plyr)
+## dplyr enables pipe syntax i.e. "%>%"
+library(dplyr)
+library(tidyverse)
+library(rworldmap)
+library(raster)
+library(rgdal)
+library(sf)
+library(ggsn)
+library(classInt)
+
+## read GPS results in a df
+gps_results <- read.csv("../Jews_Genetics_Project/GPS_results_filtered_722_Jews.csv")
+typeof(gps_results)
+dim(gps_results)
+head(gps_results)
+## Select unique single origin Jews from the dataframe
+gps_known_single_ori_results <- filter(gps_results, city1_obs!='', city2_obs=='')
+gps_known_single_ori_results %>% dim
+gps_single_known_locs <- gps_known_single_ori_results %>% 
+  dplyr::select(one_of(c('city1_obs', 'country1_obs'))) %>% unique
+gps_single_known_locs %>% dim ## Total 32 known single-origin pop groups are present
+typeof(gps_single_known_locs) ## is a list
+
+main_aj_countries <- c("Netherlands", "Russia", "Romania", "Lithuania",
+                       "Belarus", "Ukraine", "Poland", "Hungary", 
+                       "Germany", "Austria", "Latvia","Czechia")
+gps_main_aj_results <- filter(gps_known_single_ori_results, country1_obs %in% main_aj_countries)
+## 285 AJs selected
+gps_main_aj_results$Community <- gps_main_aj_results$country1_obs
+dim(gps_main_aj_results)
+str(gps_main_aj_results)
+gps_main_aj_results$Lat_pred <- gps_main_aj_results$Lat_pred %>% as.character
+gps_main_aj_results$Lat_pred <- sub(",", ".", gps_main_aj_results$Lat_pred)
+gps_main_aj_results$Lat_pred <- gps_main_aj_results$Lat_pred %>% as.numeric
+gps_main_aj_results$Long_pred <- gps_main_aj_results$Long_pred %>% as.character
+gps_main_aj_results$Long_pred <- sub(",", ".", gps_main_aj_results$Long_pred)
+gps_main_aj_results$Long_pred <- gps_main_aj_results$Long_pred %>% as.numeric
+str(gps_main_aj_results)
+
+world <- getMap(resolution = "less")
+# Call the vector in `borders()`
+#world_to_show <- world[world@data$ADMIN %in% countries_to_show, ]
+#dim(world_to_show)
+
+countries_to_annotate <- data.frame(matrix(, ncol = 3, nrow = 0))
+colnames(countries_to_annotate) <- c("country", "lat", "long")
+countries_to_annotate[1,] <- c("Turkey", 38, 32)
+countries_to_annotate[2,] <- c("Georgia", 42, 43.8)
+countries_to_annotate[3,] <- c("Syria", 35, 38)
+countries_to_annotate[4,] <- c("Ukraine", 47.5, 33)
+countries_to_annotate[5,] <- c("Iran", 36, 47.5)
+countries_to_annotate$lat <- countries_to_annotate$lat %>% as.numeric
+countries_to_annotate$long <- countries_to_annotate$long %>% as.numeric
+str(countries_to_annotate)
+
+## Plot 285 single origin AJs (re-localized to nearest shore of each)
+ggplot() +
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               fill = "#6f4e37", colour = "darkgrey") +
+  scale_shape_manual(values=1:nlevels(gps_main_aj_results$Community)) +
+  geom_point(data = gps_main_aj_results, 
+             aes(x = Long_pred, y = Lat_pred, shape = Community),
+             size=2, stroke = 0.8, colour='green') +
+  geom_text(data = countries_to_annotate, check_overlap = FALSE, 
+            color="#AFAFAF", fontface="bold",
+            size=8.5, aes(x=long, y=lat, label=country)) +
+  scale_radius(range = c(3,6)) +
+  scale_colour_discrete(l = 100) +
+  coord_quickmap(xlim=c(24, 48), ylim=c(30, 50), clip = "on") + 
+  theme_classic() +  # Remove ugly grey background
+  xlab("Longitude") +
+  ylab("Latitude") +
+  theme(
+    panel.background = element_rect(fill = "#006994"),
+    plot.title = element_text(color="#993333", size=14, face="bold"),
+    axis.title.x = element_text(color="#993333", size=14, face="bold"),
+    axis.title.y = element_text(color="#993333", size=14, face="bold"))
+ggsave("285_AJ_12_countries_original.png")
+
+## Separate AJs into three different colours
+central_eu_aj_countries <- c("Germany", "Austria", "Latvia", "Czechia")
+gps_main_aj_results$clust <- ifelse(
+  gps_main_aj_results$country1_obs=="Netherlands",
+  "Dutch AJ",
+  ifelse(gps_main_aj_results$country1_obs %in% central_eu_aj_countries,
+         "Central European & Latvian AJs","Eastern European AJs")
+)
+
+clust_mean_coord <- gps_main_aj_results %>% group_by(clust) %>% summarize(
+  Cluster=clust,
+  mean_lat=mean(Lat_pred),
+  mean_long=mean(Long_pred)
+) %>% unique
+
+gps_main_aj_results$Cluster <- ifelse(
+  gps_main_aj_results$country1_obs=="Netherlands",
+  "Dutch AJ",
+  ifelse(gps_main_aj_results$country1_obs %in% central_eu_aj_countries,
+         "Central European & Latvian AJs","Eastern European AJs")
+)
+
+## Color coords by cluster
+ggplot() +
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               fill = "#6f4e37", colour = "darkgrey") +
+  geom_point(data = gps_main_aj_results, 
+             aes(x = Long_pred, y = Lat_pred, shape=Cluster, color=Cluster),
+             size=2) +
+  geom_point(data = clust_mean_coord, size=7, colour='black',
+             aes(x = mean_long, y = mean_lat, shape = Cluster)) +
+  geom_point(data = clust_mean_coord, size=3.5,
+             aes(x = mean_long, y = mean_lat, shape = Cluster, color=Cluster)) +
+  geom_text(data = countries_to_annotate, check_overlap = FALSE, 
+            color="#AFAFAF", fontface="bold",
+            size=8.5, aes(x=long, y=lat, label=country)) +
+  scale_radius(range = c(3,6)) +
+  scale_colour_discrete(l = 100) +
+  coord_quickmap(xlim=c(24, 48), ylim=c(30, 50), clip = "on") + 
+  theme_classic() +  # Remove ugly grey background
+  xlab("Longitude") +
+  ylab("Latitude") +
+  theme(
+    panel.background = element_rect(fill = "#006994"),
+    plot.title = element_text(color="#993333", size=14, face="bold"),
+    axis.title.x = element_text(color="#993333", size=14, face="bold"),
+    axis.title.y = element_text(color="#993333", size=14, face="bold"))
+ggsave("285_AJ_12_countries_to_nearest_shore_3Clusts.png")
+
+
+## read GPS results of 285 AJs located to nearest shore in a df
+gps_aj_to_shore_results <- read.csv("285_main_aj_nearest_shore.csv")
+gps_aj_to_shore_results$Community <- gps_aj_to_shore_results$country1_obs
+typeof(gps_aj_to_shore_results)
+dim(gps_aj_to_shore_results)
+head(gps_aj_to_shore_results)
+
+## Plot 285 single origin AJs (re-localized to nearest shore of each)
+ggplot() +
+  geom_polygon(data = world, 
+               aes(x = long, y = lat, group = group),
+               fill = "#6f4e37", colour = "darkgrey") +
+  scale_shape_manual(values=1:nlevels(gps_aj_to_shore_results$Community)) +
+  geom_point(data = gps_aj_to_shore_results, 
+             aes(x = Long_pred, y = Lat_pred, shape = Community),
+             size=2, stroke = 0.8, colour='green') +
+  geom_text(data = countries_to_annotate, check_overlap = FALSE, 
+            color="#AFAFAF", fontface="bold",
+            size=8.5, aes(x=long, y=lat, label=country)) +
+  scale_radius(range = c(3,6)) +
+  scale_colour_discrete(l = 100) +
+  coord_quickmap(xlim=c(24, 48), ylim=c(30, 50), clip = "on") + 
+  theme_classic() +  # Remove ugly grey background
+  xlab("Longitude") +
+  ylab("Latitude") +
+  theme(
+    panel.background = element_rect(fill = "#006994"),
+    plot.title = element_text(color="#993333", size=14, face="bold"),
+    axis.title.x = element_text(color="#993333", size=14, face="bold"),
+    axis.title.y = element_text(color="#993333", size=14, face="bold"))
+ggsave("285_AJ_12_countries_to_nearest_shore.png")
+```
+
+![png](README_files/285_AJ_12_countries_original.png)
+![png](README_files/285_AJ_12_countries_to_nearest_shore_3Clusts.png)
+![png](README_files/285_AJ_12_countries_to_nearest_shore.png)
