@@ -7,10 +7,12 @@
 <hr />
 <br />
 
-[*Section I: Basic Setup for the project*](#sec1) <br />
-[*Section II: Download and extract genotype data of Jews for IBD and GPS analyses*](#sec2) <br />
-[*Section III: Extract genotype data of non-Jews from regions of interest in Afro-Eurasia for subsequent IBD analyses*](#sec3) <br />
-[*Section IV: IBD inference by <code>phasedibd</code> and Extract of IBD segments*](#sec4) <br />
+[Section I: Basic Setup for the project](#sec1) <br />
+[Section II: Download and extract genotype data of Jews for IBD and GPS analyses](#sec2) <br />
+[Section III: Extract genotype data of non-Jews from regions of interest in Afro-Eurasia for subsequent IBD analyses](#sec3) <br />
+[Section IV: IBD inference by <code>phasedibd</code> and Extract of IBD segments](#sec4) <br />
++ [Run phasedibd](#run-phasedibd)
++ [Removing replicate individuals and close relatives(minimally half-cousins) from Jewish individuals](#jew-qc)
 
 <hr />
 
@@ -256,15 +258,6 @@ grep Armenian v44.3_HO_public.ind
          S_Armenian-2.DG M Armenian.DG
 
 
-### Available HGDP populations:
-#### Africa:	Bantu, Biaka, Mandenka, Mbuti pygmy, Mozabite, San, and Yoruba
-#### Asia:	Western Asia	Bedouin, Druze, and Palestinian
-#### Central & South Asia:	Balochi, Brahui, Burusho, Hazara, Kalash, Makrani, Pathan, Sindhi, and Uyghur
-#### Eastern Asia:	Khmer, Dai, Daur, Han (North China), Han (South China), Hezhen, Japanese, Lahu, Miao, Mongola, Naxi, Oroqen, She, Tu, Tujia, Xibo, Yakut, Yi
-#### Native America:	Colombian, Karitiana, Maya, Pima, Surui
-#### Europe:	Adygei, Basque, French, North Italian, Orcadian, Russian, Sardinian, and Tuscan
-#### Oceania:	Melanesian, and Papuan
-
 ### Suitable populations in summary: 
 #### Turkic : Turkish, Chuvash, Tatar, Bashkir, Uzbek, Turkmen
 #### Mid-eastern and Iranic: Iranian, Iranian(Bandari, Gulf region), Bedouin, Druze, Palestinian, Syrian, Assyrian, Kurd, Lebanese (Christian, Muslim, unknown), Jordanian, Saudi, Pathan
@@ -274,8 +267,8 @@ grep Armenian v44.3_HO_public.ind
 #### Northern Europe: Norwegian, Finnish
 #### North Africa: Tunisian, Algerian, Egyptian, Moroccan, Libyan
 
-## Mid-eastern and Iranic
 
+## Mid-eastern and Iranic
 
 ```bash
 %%bash
@@ -3432,8 +3425,9 @@ pagani2016_HO_fam.to_csv("PaganiEtAl2016_15indivs_1240K_HO.fam", sep='\t', heade
 #### 4. Merge the two datasets with corrected <code>.bim</code> files. Sort the overlapping SNPs out using <code>--write-snplist</code> and <code>--extract</code> option in PLINK to obtain the final dataset. 
 
 
-```python
-! head -n5 ibd_non_Jews_main.bim
+```bash
+%%bash
+head -n5 ibd_non_Jews_main.bim
 ```
 
     1	rs3094315	0.02013	752566	G	A
@@ -3775,6 +3769,2323 @@ for chr in {1..22}; do
 done
 ```
 
+
 <a name="sec4"></a>
 # Section IV: IBD inference by <code>phasedibd</code> and Extract of IBD segments
 
+
+### Reference: https://github.com/23andMe/phasedibd 
+### https://www.biorxiv.org/content/10.1101/2020.09.14.296939v1.full.pdf
+### https://www.biorxiv.org/content/10.1101/2020.09.14.296939v1
+
+```python
+cd ../
+```
+
+```bash
+%%bash
+git clone https://github.com/23andMe/phasedibd
+```
+
+    Cloning into 'phasedibd'...
+    remote: Enumerating objects: 106, done.[K
+    remote: Counting objects: 100% (106/106), done.[K
+    remote: Compressing objects: 100% (72/72), done.[K
+    remote: Total 106 (delta 41), reused 85 (delta 30), pack-reused 0[K
+    Receiving objects: 100% (106/106), 16.47 MiB | 18.02 MiB/s, done.
+    Resolving deltas: 100% (41/41), done.
+
+
+<a name="run-phasedibd"></a>
+```python
+cd phasedibd/
+```
+
+```bash
+%%bash
+make
+python setup.py install 
+python tests/unit_tests.py
+```
+
+
+```python
+cd phasedibd/
+```
+
+### merged_imputed935Jews_1305nonJews_overlap_QC: 455546 variants
+
+```bash
+%%bash
+for chr in {1..22}; do \
+  gunzip -k ../../1240K_HO_pop_of_interest/merged_imputed935Jews_1320nonJews_overlap_QC_chr${chr}.vcf.gz
+done
+```
+
+### According to the paper, <code>L_f=3</code> and <code>L_m=200</code> were used for the case study (empirical analysis of geographic patterns of haplotype sharing within Mexico)
+
+
+```python
+import phasedibd as ibd
+from multiprocessing import Pool
+
+def run_chr_phasedibd(chro):
+    prefix_f = f"../../1240K_HO_pop_of_interest/merged_imputed935Jews_1320nonJews_overlap_QC_chr{chro}"
+    tpbwt = ibd.TPBWTAnalysis()
+    haplotypes_f = ibd.VcfHaplotypeAlignment(f"{prefix_f}.vcf", f"{prefix_f}.map")
+    tpbwt.compute_ibd(haplotypes_f, compressed_out_path=f'compressed_haplotypes_1320_chr{chro}/', \
+        chromosome=chro, segments_out_path=f"imputed935Jews_1320nonJews_L_m-200_chr{chro}", L_f=3, L_m=200)
+    
+if __name__ == '__main__':
+    # calculate 22 autosomes in parallel
+    pool = Pool(22)
+    pool.map(run_chr_phasedibd, [str(chro) for chro in range(1, 23)])
+    pool.close()
+    pool.join()
+```
+
+```bash
+%%bash
+rm -rf compressed_haplotypes_1320_chr*
+```
+
+### Rename all these output .csv files
+
+
+```bash
+%%bash
+ls imputed*/*.csv|wc -l
+ls imputed*/*.csv|while read csv; do 
+  newname=$(echo $csv|sed -r 's/\/[0-9]+\.csv/\.csv/') &&
+  mv $csv $newname;
+done
+rmdir imputed935Jews*
+ls *.csv
+```
+
+### In order to find out the individuals correctly, we would like to load <code>.fam</code> file of two merged dataset and switch <code>id1</code> and <code>id2</code> in the dfs from integers to their real <code>f'{fid}_{iid}'</code>
+
+
+```python
+df_aj_1320_fam = pd.read_csv("../../1240K_HO_pop_of_interest/merged_imputed935Jews_1320nonJews_overlap_QC.fam", delimiter=" ", header=None)
+## The first column is $fid, the second is $iid
+aj_1320_ids = df_aj_1320_fam[0].str.cat(df_aj_1320_fam[1].astype(str), sep="_").tolist()
+```
+
+### Therefore, let's write a script to reformat the output <code>.csv</code> files by converting the IDs, adding a column 'cm_len' and removing same-person IBD segments
+
+
+```bash
+%%bash
+mkdir -p imputed935Jews_1320nonJews_reformatted
+```
+
+```python
+import pandas as pd
+
+def convert_ibd_csv(ibd_f: str, id_list: list, out_fname):
+    ibd_df = pd.read_csv(ibd_f)
+    ## Remove same-person IBD segments
+    ibd_df = ibd_df.drop(ibd_df.loc[ibd_df['id1']==ibd_df['id2']].index).reset_index()
+    ibd_df = ibd_df.drop(['index'], axis=1)
+    ibd_df['cm_len'] = round(ibd_df['end_cm'] - ibd_df['start_cm'], 4)
+    ibd_df['id1'] = ibd_df['id1'].apply(lambda el: id_list[el])
+    ibd_df['id2'] = ibd_df['id2'].apply(lambda el: id_list[el])
+    ibd_df.to_csv(out_fname, index=False)
+
+if __name__ == "__main__": 
+    df_aj_1320_fam = pd.read_csv("../../1240K_HO_pop_of_interest/merged_imputed935Jews_1320nonJews_overlap_QC.fam", delimiter=" ", header=None)
+    ## The first column is $fid, the second is $iid
+    aj_1320_ids = df_aj_1320_fam[0].str.cat(df_aj_1320_fam[1].astype(str), sep="_").tolist()
+    for chro in range(1, 23):
+        chro = str(chro)
+        ibd_f = f"imputed935Jews_1320nonJews/imputed935Jews_1320nonJews_L_m-200_chr{chro}.csv"
+        out_fname= f"imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chro}.csv"
+        convert_ibd_csv(ibd_f, aj_1320_ids, out_fname)
+```
+
+### Gzip reformatted <code>.csv</code> files into a <code>.tar.gz</code> file
+
+
+```bash
+%%bash
+tar -cz imputed935Jews_1320nonJews_reformatted/ > imputed935Jews_1320nonJews_reformatted.tar.gz &&
+du -sh *.tar.gz
+```
+
+    64M	imputed935Jews_1320nonJews_reformatted.tar.gz
+    47M	imputed935Jews_1320nonJews.tar.gz
+
+
+```bash
+%%bash
+mv *_reformatted ..
+```
+
+
+```python
+cd ../
+```
+
+```bash
+%%bash
+ls ../1240K_HO_pop_of_interest/*.id|grep -vE "(HGDP|indiv)"|wc -l
+ls ../1240K_HO_pop_of_interest/*.id|grep -vE "(HGDP|indiv)" > 76pop_non_jews_id_file_list.txt
+```
+
+    76
+
+
+<a name="jew-qc"></a>
+### Removing replicate individuals and close relatives(minimally half-cousins) from Jewish individuals
+
+#### Extract IBD within each Jewish community
+
+```bash
+%%bash
+mkdir -p Jewish_pop_intra_IBD
+```
+
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+import re
+
+'''
+There're 935 modern Jewish individuals in total, including 511 Ashkenazic Jews(AJ) and 424 other Jews(OJ).
+This script presents average IBD segment length per pair in Centimorgans.
+'''
+
+def write_jew_intra_pop_pair_ibd(jew_pop: tuple, jew_geo_id_dict: dict):
+    ## jew_pop is a tuple of two elements. 
+    ### The first element is the real name of Jewish population. 
+    ### The second element is its key at jew_geo_id_dict
+    jew_pop_indivs = jew_geo_id_dict[jew_pop[1]]
+    ## obtain the number of individuals from this Jewish population
+    jew_pop_size = len(jew_pop_indivs)
+    ## If n<2, we should not calculate intra-group IBD 
+    if jew_pop_size < 2: return
+    ## exclude IBD between two haplotypes of the same individual
+    num_indiv_pairs = jew_pop_size*(jew_pop_size-1)/2
+    jew_indiv_pair_ibd_dict = {}
+    for i in range(jew_pop_size):
+        for j in range(i+1, jew_pop_size):
+            iid1, iid2 = jew_pop_indivs[i], jew_pop_indivs[j]
+            jew_indiv_pair_ibd_dict[f'{iid1}__{iid2}'] = 0
+    ## Create a dataframe to store sums of intra-population individual pairwise IBD length
+    ### Output the dataframe into a csv file later
+    jew_pop_intra_df = pd.DataFrame(columns=['IBD_cM'], index=list(jew_indiv_pair_ibd_dict.keys()))
+    jew_pop_intra_df['IBD_cM'] = 0
+    #print(jew_pop_intra_df.index)
+    ## Loop through 22 autosomes
+    for chr in range(1, 23):
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        pop_intra_df = df.loc[\
+                (df['id1'].isin({iid: "" for iid in jew_pop_indivs})) & 
+                (df['id2'].isin({iid: "" for iid in jew_pop_indivs})) 
+            ]
+        ibd_row_num = pop_intra_df.shape[0]
+        for i in range(ibd_row_num):
+            ibd_row = pop_intra_df.iloc[i]
+            # id is in the form of f'{fid}_{iid}', $fid is a digit
+            iid1=ibd_row['id1']
+            iid2=ibd_row['id2']
+            ibd_len = ibd_row['cm_len']
+            #print(iid1, iid2)
+            if f'{iid1}__{iid2}' in jew_indiv_pair_ibd_dict:
+                #print("matched")
+                jew_pop_intra_df.loc[f'{iid1}__{iid2}', 'IBD_cM']+=round(float(ibd_len), 5)
+            elif f'{iid2}__{iid1}' in jew_indiv_pair_ibd_dict:
+                #print("matched")
+                jew_pop_intra_df.loc[f'{iid2}__{iid1}', 'IBD_cM']+=round(float(ibd_len), 5)
+    ## Write to the general CSV file
+    with open("Jew_subpops_intra_mean_pairwise_ibd_length.csv", "a") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        mean_v = round(jew_pop_intra_df['IBD_cM'].sum()/num_indiv_pairs, 3)
+        ibd_csv_writer.writerow([jew_pop[0], str(mean_v), jew_pop_size, \
+                                 round(st.sem(jew_pop_intra_df['IBD_cM'].tolist()), 3)])
+    ## Write to an individual CSV file
+    ## "jew_pop" is a tuple in the form like ("Berlin", "Germany", nan, nan), 
+    ### so the second element annotates country
+    jew_pop_intra_df.round(decimals=4).to_csv(f"Jewish_pop_intra_IBD/{jew_pop[0]}_intraIBD.csv", encoding='utf-8')
+    
+
+if __name__ == '__main__':
+    # warnings.filterwarnings("ignore")
+    # load 935 Jews into variables
+    df_jews = pd.read_csv('../Jews_Genetics_Project/pre_QC_935_Jews_annotation.csv', header=0)
+    df_aj = df_jews.loc[lambda x: x['data_source'].str.contains('AJ$', regex = True)]
+    df_otherj = df_jews.loc[lambda x: x['data_source'].str.contains('otherJ$', regex = True)]
+    ## add single-origin French Jews to df_otherJ
+    df_FrenchJ = df_jews.loc[(df_jews['country1']=="France") & (df_jews['country2'].isnull())]
+    ## add single-origin Italian Jews to df_otherJ
+    df_ItalianJ = df_jews.loc[df_jews['country1']=="Italy"]
+    ## Concat three dfs and drop duplicates
+    df_otherj = pd.concat([df_otherj, df_FrenchJ, df_ItalianJ]).drop_duplicates()
+    ## Create two dictionaries according to unique geographic origin
+    df_aj_geo_groups= df_aj.groupby(['city1', 'country1', 'city2', 'country2']).groups
+    df_oj_geo_groups= df_otherj.groupby(['city1', 'country1']).groups
+    ##########################
+    # print(df_oj_geo_groups)
+    
+    aj_geo_id_dict, oj_geo_id_dict = {}, {}
+    
+    ## non-mixed & unknown AJs, city2 & country2 must be nan
+    for key, val in df_aj_geo_groups.items():
+        for ind in val:
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            cat_id = "_".join((fid, iid))
+            ## If non nan are present in key(a tuple of 4 elements) it's a mixed indiv, pass
+            if not np.nan in key: 
+                pass
+            ## only NaN in key, thus being geographically unknown
+            #elif len(set(key)) == 1:
+                #pass
+            elif not "Italy" in key and not "France" in key:
+                if key not in aj_geo_id_dict: aj_geo_id_dict[key]=[]  
+                aj_geo_id_dict[key].append(cat_id)
+    
+    ## Other-Jews
+    for key, val in df_oj_geo_groups.items():
+        for ind in val:
+            ## avoid mixed individuals
+            if not np.nan in key: 
+                pass
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            if key not in oj_geo_id_dict: oj_geo_id_dict[key]=[]
+            cat_id = "_".join((fid, iid))
+            oj_geo_id_dict[key].append(cat_id)
+    
+    ## use this variable to store population names for all Jews
+    jewish_pops = []
+    for key in aj_geo_id_dict:
+        pop_el = (f'{key[1]}AJ', key)
+        jewish_pops.append(pop_el)
+    for key in oj_geo_id_dict:
+        if key[0] == "Mosul":
+            pop_el = ('KurdistanOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Ar Raqqah':
+            pop_el = ('SyrianKurdistanOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Mumbai':
+            pop_el = ('IndiaMumbaiOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Thiruvananthapuram':
+            pop_el = ('IndiaCochinOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Tbilisi':
+            pop_el = ('GeorgiaOJ', key)
+            jewish_pops.append(pop_el)
+        else:
+            pop_el = (f'{key[1]}OJ', key)
+            jewish_pops.append(pop_el)
+    
+    #print(jewish_pops)
+    aj_geo_id_dict.update(oj_geo_id_dict)
+    jews_geo_dict = aj_geo_id_dict
+    aj_geo_id_dict = None
+    #print(jews_geo_dict)
+    ## Output .csv file for mean pairwise IBD length
+    with open("Jew_subpops_intra_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop1', 'pop2', 'mean_pairwise_IBD_length', \
+                                 'pop1_size', 'pop2_size', 'IBD_len_SE'])
+    
+    ## For shorter computing time, 
+    ## Run multi-processing using non-mixed subpop AJs and OJs
+    partial_func = partial(write_jew_intra_pop_pair_ibd, jew_geo_id_dict=jews_geo_dict)
+    ## the pool occupies 14 threads(14 sub-populations of AJ in parallel, excluding the Italian & French "AJ")
+    ## There should be n*(n+1)/2 pairs within each group to compare IBD
+    ## However, only one Moldavian AJ and one Slovakian AJ are present. 
+    ### Therefore, it does not make sense to investigate these two groups
+    pool = Pool(20)
+    pool.map(partial_func, jewish_pops)
+    pool.close()
+    pool.join()
+```
+
+### We found some replicate individuals as well as suspected close relatives within same groups of Jews
+
+### Select 448.75 cM as the threshold for filtering since any individual pairs that are IBD at > 448.75 cM are considered to be at least first cousins.
+
+
+```bash
+%%bash
+ls Jewish_pop_intra_IBD/*.csv|while read csv; do
+  pop=$(echo $csv|cut -d "/" -f 2|cut -d "_" -f 1);
+  cat $csv|while read pair; do
+    awk -v csv="$csv" -v pair="$pair" -v pop="$pop" -v FS="," '{if(int($2) > 448.75){print $0, pop}}';
+  done
+done|sort
+```
+
+    0_pop_11903_1118__TunisiaJew1118_TunisiaJew1118,5456.9549 TunisiaOJ
+    0_pop_11903_1421__TunisiaJew1421_TunisiaJew1421,5447.2472 TunisiaOJ
+    0_pop_11903_1511__TunisiaJew1511_TunisiaJew1511,5625.7502 TunisiaOJ
+    0_pop_11903_1544__TunisiaJew1544_TunisiaJew1544,5521.0044 TunisiaOJ
+    0_pop_11903_5200__TunisiaJew5200_TunisiaJew5200,5672.7867 TunisiaOJ
+    0_pop_11907_5159__sephardic17bul_sephardic17bul,7816.7279 BulgariaOJ
+    0_pop_11910_1599__eth_jew14_eth_jew14,5441.2251 EthiopiaOJ
+    0_pop_11910_1599__eth_jew4_eth_jew4,5443.6669 EthiopiaOJ
+    0_pop_11910_1613__eth_jew5_eth_jew5,5420.3634 EthiopiaOJ
+    0_pop_11910_1683__eth_jew6_eth_jew6,5468.0983 EthiopiaOJ
+    0_pop_11910_1804__eth_jew7_eth_jew7,5470.8836 EthiopiaOJ
+    0_pop_11910_1818__eth_jew8_eth_jew8,5487.5635 EthiopiaOJ
+    0_pop_11910_4524__eth_jew10_eth_jew10,5476.3477 EthiopiaOJ
+    0_pop_11910_4568__eth_jew11_eth_jew11,5486.7092 EthiopiaOJ
+    0_pop_11910_4574__eth_jew12_eth_jew12,5415.701 EthiopiaOJ
+    0_pop_11910_4656__eth_jew13_eth_jew13,5497.0591 EthiopiaOJ
+    0_pop_11915_1161__iran_jew1_iran_jew1,7145.2153 IranOJ
+    0_pop_11915_1409__IranJew1409_IranJew1409,5474.5211 IranOJ
+    0_pop_11915_1419__IranJew1419_IranJew1419,5083.2672 IranOJ
+    0_pop_11915_1557__IranJew1557_IranJew1557,5436.1558 IranOJ
+    0_pop_11916_1418__iraq_jew1_iraq_jew1,7116.8662 IraqOJ
+    0_pop_11916_1444__iraq_jew6_iraq_jew6,7279.6497 IraqOJ
+    0_pop_11931_1953__Yemen_Jew_6_Yemen_Jew_6,7030.2813 YemenOJ
+    0_pop_920_1551__KurdJew1551_KurdJew1551,5422.8385 KurdistanOJ
+    0_pop_920_1824__KurdJew1824_KurdJew1824,5370.1578 KurdistanOJ
+    0_pop_920_4584__KurdJew1580_KurdJew1580,5344.2976 KurdistanOJ
+    0_pop_920_4584__KurdJew1592_KurdJew1592,606.723 KurdistanOJ
+    0_pop_920_4633__KurdJew4633_KurdJew4633,5351.5627 KurdistanOJ
+    0_pop_920_4663__KurdJew4663_KurdJew4663,5423.2492 KurdistanOJ
+    0_pop_922_1579__LibyaJew1579_LibyaJew1579,5414.1643 LibyaOJ
+    eth_jew4_eth_jew4__eth_jew14_eth_jew14,6911.4999 EthiopiaOJ
+    KurdJew1580_KurdJew1580__KurdJew1592_KurdJew1592,879.0088 KurdistanOJ
+    MorJew2001_MorJew2001__Morocco_Jew_1_Morocco_Jew_1,6872.4927 MoroccoOJ
+    single-Belarus-sample_108__single-Belarus-sample_119,1763.672 BelarusAJ
+    single-Poland-sample_061__single-Poland-sample_068,2133.6032 PolandAJ
+
+
+### Priority for selection from a pair of duplicates judging the number of SNPs:
+#### Behar et. al., 2010 ( ~570K SNPs ) > Kopelman et. al., 2020 ( ~470K SNPs ) > Behar et. al., 2013 ( ~300K SNPs )
+
+#### For suspected close relatives, let's select the first sample at each pair
+
+
+```bash
+%%bash
+echo -e "
+family_id,individual_id
+TunisiaJew1118,TunisiaJew1118
+TunisiaJew1421,TunisiaJew1421
+TunisiaJew1511,TunisiaJew1511
+TunisiaJew1544,TunisiaJew1544
+TunisiaJew5200,TunisiaJew5200
+0,pop_11907_5159
+0,pop_11910_1599
+0,pop_11910_1599
+0,pop_11910_1613
+0,pop_11910_1683
+0,pop_11910_1804
+0,pop_11910_1818
+0,pop_11910_4524
+0,pop_11910_4568
+0,pop_11910_4574
+0,pop_11910_4656
+0,pop_11915_1161
+IranJew1409,IranJew1409
+IranJew1419,IranJew1419
+IranJew1557,IranJew1557
+0,pop_11916_1418
+0,pop_11916_1444
+0,pop_11931_1953
+KurdJew1551,KurdJew1551
+KurdJew1824,KurdJew1824
+KurdJew1580,KurdJew1580
+KurdJew1592,KurdJew1592
+KurdJew4633,KurdJew4633
+KurdJew4663,KurdJew4663
+LibyaJew1579,LibyaJew1579
+eth_jew14,eth_jew14
+KurdJew1592,KurdJew1592
+MorJew2001,MorJew2001
+single-Belarus-sample,119
+single-Poland-sample,068
+" > jews_to_delete.csv
+```
+
+
+```bash
+%%bash
+cat jews_to_delete.csv|sort|uniq|wc -l
+wc -l ../Jews_Genetics_Project/pre_QC_935_Jews_annotation.csv
+## check the number of nique individual IDs
+cat ../Jews_Genetics_Project/pre_QC_935_Jews_annotation.csv|cut -d , -f 3|sort|uniq|wc -l
+```
+
+    35
+    936 ../Jews_Genetics_Project/pre_QC_935_Jews_annotation.csv
+    936
+
+```python
+import pandas as pd
+
+jews_935_df = pd.read_csv("../Jews_Genetics_Project/pre_QC_935_Jews_annotation.csv")
+print(jews_935_df.shape)
+jews_to_delete_df = pd.read_csv("jews_to_delete.csv")
+iids_to_delete_dict = {v: k for k, v in dict(jews_to_delete_df['individual_id']).items()}
+print(len(iids_to_delete_dict.items()))
+filtered_jews_df = jews_935_df.loc[~(jews_935_df['individual_id'].isin(iids_to_delete_dict))].reset_index()
+filtered_jews_df = filtered_jews_df.drop(['index'], axis=1)
+print(filtered_jews_df)
+filtered_jews_df.to_csv("Bray2010_Behar1013_Gladstein2019_Kopelman2020_902Jews.csv", index=None)
+```
+
+    (935, 11)
+    33
+                    data_source     family_id individual_id  latitude1  \
+    0      Kopelman_2020_148_AJ             0  pop_917_5750    41.8960   
+    1    Kopelman2020_239otherJ             0   pop_920_155    36.3450   
+    2    Kopelman2020_239otherJ             0   pop_920_174    36.3450   
+    3    Kopelman2020_239otherJ             0   pop_920_209    36.3450   
+    4    Kopelman2020_239otherJ             0  pop_920_1551    36.3450   
+    ..                      ...           ...           ...        ...   
+    897   Behar_2010_100_otherJ  Yemen_Jew_11  Yemen_Jew_11    15.3547   
+    898   Behar_2010_100_otherJ  Yemen_Jew_12  Yemen_Jew_12    15.3547   
+    899   Behar_2010_100_otherJ  Yemen_Jew_13  Yemen_Jew_13    15.3547   
+    900   Behar_2010_100_otherJ  Yemen_Jew_14  Yemen_Jew_14    15.3547   
+    901   Behar_2010_100_otherJ  Yemen_Jew_15  Yemen_Jew_15    15.3547   
+    
+         longtitude1  city1 country1  latitude2  longtitude2 city2 country2  
+    0        12.4833   Rome    Italy        NaN          NaN   NaN      NaN  
+    1        43.1450  Mosul     Iraq        NaN          NaN   NaN      NaN  
+    2        43.1450  Mosul     Iraq        NaN          NaN   NaN      NaN  
+    3        43.1450  Mosul     Iraq        NaN          NaN   NaN      NaN  
+    4        43.1450  Mosul     Iraq        NaN          NaN   NaN      NaN  
+    ..           ...    ...      ...        ...          ...   ...      ...  
+    897      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    898      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    899      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    900      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    901      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    
+    [902 rows x 11 columns]
+
+
+
+```bash
+%%bash
+head -n5 Bray2010_Behar1013_Gladstein2019_Kopelman2020_902Jews.csv
+```
+
+    data_source,family_id,individual_id,latitude1,longtitude1,city1,country1,latitude2,longtitude2,city2,country2
+    Kopelman_2020_148_AJ,0,pop_917_5750,41.896,12.4833,Rome,Italy,,,,
+    Kopelman2020_239otherJ,0,pop_920_155,36.345,43.145,Mosul,Iraq,,,,
+    Kopelman2020_239otherJ,0,pop_920_174,36.345,43.145,Mosul,Iraq,,,,
+    Kopelman2020_239otherJ,0,pop_920_209,36.345,43.145,Mosul,Iraq,,,,
+
+
+### Therefore, 33 individuals, including 2 AJs and 31 other Jews were filtered out. 
+### After filtering, we have 288 single-origin AJs, 221 mixed-origin AJs and 393 other Jews, i.e. 509 AJs and 393 OJs.
+
+### In addition, let's write two scripts to extract IBD sharing between different AJ sub-populations and between different OJ sub-populations.
+
+```bash
+%%bash
+mkdir -p aj_pops_inter_IBD -p oj_pops_inter_IBD
+```
+
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+import re
+
+'''
+There're 902 modern Jewish individuals in total, including 509 Ashkenazic Jews(AJ) and 393 other Jews(other_aj).
+This script presents average IBD segment length per pair in Centimorgans.
+'''
+
+def write_aj_aj_pop_pair_ibd(aj_pop: tuple, aj_geo_id_dict: dict, aj_id_geo_dict: dict):
+    ## aj_pop is a tuple of two elements. 
+    ### The first element is the real name of Jewish population. 
+    ### The second element is its key at aj_geo_id_dict
+    aj_pop_indivs = aj_geo_id_dict[aj_pop[1]]
+    aj_pop_indivs_dict = {iid: "" for iid in aj_pop_indivs}
+    ## obtain the number of individuals from this Jewish population
+    aj_pop_size = len(aj_pop_indivs)
+    other_aj_col_names = []
+    for other_aj_id in aj_id_geo_dict.keys(): 
+        ## the prefix should be country name = "AJ"
+        other_aj_col_prefix = f'{aj_id_geo_dict[other_aj_id][1]}AJ'
+        other_aj_col_names.append(f'{other_aj_col_prefix}__{other_aj_id}')
+    aj_other_aj_df = pd.DataFrame(columns=aj_pop_indivs, index=other_aj_col_names)
+    for aj_id in aj_pop_indivs:
+        aj_other_aj_df[aj_id]=0
+    # Use this dict the store the following key:value pair
+    ## f'{AJ_SUBPOP_NAME}_{OTHER_SUBPOP_NAME}'(key): mean pairwise IBD length(float)
+    ajsubpop_other_ajsubpop_mean_pws_ibd_len = {}
+    ## Loop through 22 autosomes
+    for chr in range(1, 23):
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        aj_subpop_ibd_df = df.loc[
+            (df['id1'].isin(aj_pop_indivs_dict)) | (df['id2'].isin(aj_pop_indivs_dict)) 
+        ]
+        for other_aj_pop in aj_geo_id_dict.keys():
+            #########################################################
+            # Filter into the corresponding IBD segments
+            if other_aj_pop == aj_pop[1]: continue
+            other_aj_subpop_id_dict = {el: '' for el in aj_geo_id_dict[other_aj_pop]}
+            filtered_df = aj_subpop_ibd_df.loc[
+                (df['id1'].isin(other_aj_subpop_id_dict)) | (df['id2'].isin(other_aj_subpop_id_dict))
+            ]
+            other_aj_pop_size = len(aj_geo_id_dict[other_aj_pop])
+            other_aj_pop_str = other_aj_pop[1] if np.nan not in other_aj_pop else 'unknown'
+            pop_pair_str = f'{aj_pop[0]}_{other_aj_pop_str}AJ'
+            ## use the condition "aj_pop[0] > other_aj_pop_str" to avoid replicate pairs, i.e. A & B and B & A
+            if aj_pop_size > 0 and other_aj_pop_size > 0 and aj_pop[0] > other_aj_pop_str:
+                ## Create a string to describe the AJ subgroup-OJ subgroup pair
+                if pop_pair_str not in ajsubpop_other_ajsubpop_mean_pws_ibd_len:
+                    ## value of the dict is initially a list, [sum_of_ibd_lengths, subpop_size1, subpop_size2]
+                    ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str]=[0, aj_pop_size, other_aj_pop_size, {}]
+                ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][0]+=filtered_df['cm_len'].sum()
+            ##################################################
+            # Output the CSV file storing IBD length between each pair of individuals
+            filtered_row_num = filtered_df.shape[0]
+            #print(chr, pop_pair_str, filtered_row_num)
+            for i in range(filtered_row_num):
+                ibd_row = filtered_df.iloc[i]
+                # id is in the form of f'{fid}_{iid}', $fid is a digit
+                id1=ibd_row['id1']
+                id2=ibd_row['id2']
+                ibd_len = ibd_row['cm_len']
+                ###Test
+                #print(ibd_len)
+                ###
+                if id1 in aj_pop_indivs_dict and id2 in other_aj_subpop_id_dict:
+                    ## the prefix should be country name + 'AJ'
+                    id2_prefix = f'{aj_id_geo_dict[id2][1]}AJ'
+                    aj_other_aj_df.loc[f'{id2_prefix}__{id2}', id1]+=round(float(ibd_len), 5)
+                    ###Test
+                    #print(aj_other_aj_df.loc[f'{id2_prefix}__{id2}', id1])
+                    ###
+                    indiv_pair_key = f'{id1}__{id2}'
+                elif id2 in aj_pop_indivs_dict and id1 in other_aj_subpop_id_dict:
+                    id1_prefix = f'{aj_id_geo_dict[id1][1]}AJ'
+                    aj_other_aj_df.loc[f'{id1_prefix}__{id1}', id2]+=round(float(ibd_len), 5)
+                    indiv_pair_key = f'{id2}__{id1}'
+                if pop_pair_str in ajsubpop_other_ajsubpop_mean_pws_ibd_len:
+                    #print(pop_pair_str)
+                    #print(ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][3].keys())
+                    if not indiv_pair_key in ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][3]:
+                        ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]=0
+                    ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]+=\
+                        round(float(ibd_len), 5)
+    ##########################################################################################
+    ##########################################################################################
+    # Finally, calculate the mean pairwise IBD length for AJ versus other AJs
+    ## after looping through 22 autosomes
+    ### This dict should have 14*48 items
+    with open("AJ_subpop_inter_mean_pairwise_ibd_length.csv", "a+") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ### This dict should have 14*13/2 items
+        for k, v in ajsubpop_other_ajsubpop_mean_pws_ibd_len.items():
+            if type(v) is list:
+                if len(v)==4:
+                    num_non_zero_ibd_indiv_pairs = len(v[3].keys())
+                    num_possible_pairs = int(v[1])*int(v[2])
+                    num_zeros_to_add = num_possible_pairs - num_non_zero_ibd_indiv_pairs
+                    v[3] = list(v[3].values())
+                    if num_zeros_to_add > 0:
+                        v[3].extend([0]*num_zeros_to_add)
+                    pop1=k.split("_")[0]
+                    pop2="_".join(tuple(k.split("_")[1:]))
+                    mean_v = round(v[0]/num_possible_pairs, 3)
+                    # v[3] is a list
+                    #print(v[3])
+                    ibd_csv_writer.writerow([pop1,pop2,str(mean_v),str(v[1]),str(v[2]),\
+                                             round(st.sem(v[3]), 3)])
+    #################################################################################################
+    ## Additionally, output 14 .csv files storing total IBD length between every pairs of individuals
+    ## after looping through 22 autosomes
+    ### Reference for conversion from df to csv: 
+    ####: https://towardsdatascience.com/how-to-export-pandas-dataframe-to-csv-2038e43d9c03
+    #### Write to an individual CSV file
+    #### "aj_pop" is a tuple in the form like ("Berlin", "Germany", nan, nan), 
+    #### so the second element annotates country
+    aj_other_aj_df.round(decimals=4).to_csv(f"aj_pops_inter_IBD/{aj_pop[0]}_IBD.csv", encoding='utf-8')
+    
+
+if __name__ == '__main__':
+    # warnings.filterwarnings("ignore")
+    # load 902 Jews into variables
+    df_jews = pd.read_csv('Bray2010_Behar1013_Gladstein2019_Kopelman2020_902Jews.csv', header=0)
+    df_aj = df_jews.loc[lambda x: x['data_source'].str.contains('AJ$', regex = True)]
+    ## Create two dictionaries according to unique geographic origin
+    df_aj_geo_groups= df_aj.groupby(['city1', 'country1', 'city2', 'country2']).groups
+    aj_geo_id_dict, aj_id_geo_dict = {}, {}
+    
+    ## non-mixed & unknown AJs, city2 & country2 must be nan
+    for key, val in df_aj_geo_groups.items():
+        for ind in val:
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            cat_id = "_".join((fid, iid))
+            ## If non nan are present in key(a tuple of 4 elements) it's a mixed indiv, pass
+            if not np.nan in key: 
+                pass
+            ## only NaN in key, thus being geographically unknown
+            #elif len(set(key)) == 1:
+                #pass
+            elif not "Italy" in key and not "France" in key:
+                if key not in aj_geo_id_dict: aj_geo_id_dict[key]=[]  
+                aj_geo_id_dict[key].append(cat_id)
+                aj_id_geo_dict[cat_id]=key
+    
+    ## use this variable to store population names for all Jews
+    jewish_pops = []
+    for key in aj_geo_id_dict:
+        pop_el = (f'{key[1]}AJ', key)
+        jewish_pops.append(pop_el)
+    
+    #print(jewish_pops)
+    ## Output .csv file for mean pairwise IBD length
+    with open("AJ_subpop_inter_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop1', 'pop2', 'mean_pairwise_IBD_length', 'pop1_size', 'pop2_size', \
+                                 'IBD_len_SE'])
+    
+    ## For shorter computing time, 
+    ## Run multi-processing using non-mixed subpop AJs and other_ajs
+    partial_func = partial(write_aj_aj_pop_pair_ibd, aj_geo_id_dict=aj_geo_id_dict, aj_id_geo_dict=aj_id_geo_dict)
+    ## the pool occupies 14 threads(14 sub-populations of AJ in parallel, excluding the Italian & French "AJ")
+    ## There should be 14*(14-1)/2 pairs of AJs to compare IBD
+    ## However, only one Moldavian AJ and one Slovakian AJ are present. 
+    pool = Pool(14)
+    pool.map(partial_func, jewish_pops)
+    pool.close()
+    pool.join()
+
+```
+
+
+### Inter-group IBD sharing between 23 sub-groups of other Jews
+
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+import re
+
+'''
+There're 901 modern Jewish individuals in total, including 508 Ashkenazic Jews(OJ) and 393 other Jews(OJ).
+This script presents average IBD segment length per pair in Centimorgans.
+Version of refined-ibd: refined-ibd.17Jan20.102
+Version of Java: Java/1.8.0_192
+refined-ibd analysis was performed using the default parameters, e.g. minimum-lod=3
+'''
+
+def write_oj_oj_pop_pair_ibd(oj_pop: tuple, oj_geo_id_dict: dict, oj_id_geo_dict: dict):
+    ## oj_pop is a tuple of two elements. 
+    ### The first element is the real name of Jewish population. 
+    ### The second element is its key at oj_geo_id_dict
+    oj_pop_indivs = oj_geo_id_dict[oj_pop[1]]
+    oj_pop_indivs_dict = {iid: "" for iid in oj_pop_indivs}
+    ## obtain the number of individuals from this Jewish population
+    oj_pop_size = len(oj_pop_indivs)
+    other_oj_col_names = []
+    for other_oj_id in oj_id_geo_dict.keys(): 
+        ## the prefix should be country name = "OJ"
+        if oj_id_geo_dict[other_oj_id] == oj_pop[1]: continue
+        other_oj_col_prefix = f'{oj_id_geo_dict[other_oj_id][0]}-{oj_id_geo_dict[other_oj_id][1]}OJ'
+        other_oj_col_names.append(f'{other_oj_col_prefix}__{other_oj_id}')
+    oj_other_oj_df = pd.DataFrame(columns=oj_pop_indivs, index=other_oj_col_names)
+    for oj_id in oj_pop_indivs:
+        oj_other_oj_df[oj_id]=0
+    # Use this dict the store the following key:value pair
+    ## f'{OJ_SUBPOP_NAME}_{OTHER_SUBPOP_NAME}'(key): mean pairwise IBD length(float)
+    ojsubpop_other_ojsubpop_mean_pws_ibd_len = {}
+    ## Loop through 22 autosomes
+    for chr in range(1, 23):
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        oj_subpop_ibd_df = df.loc[
+            (df['id1'].isin(oj_pop_indivs_dict)) | (df['id2'].isin(oj_pop_indivs_dict)) 
+        ]
+        for other_oj_pop in oj_geo_id_dict.keys():
+            #########################################################
+            # Filter into the corresponding IBD segments
+            if other_oj_pop == oj_pop[1]: continue
+            other_oj_subpop_id_dict = {el: '' for el in oj_geo_id_dict[other_oj_pop]}
+            filtered_df = oj_subpop_ibd_df.loc[
+                (df['id1'].isin(other_oj_subpop_id_dict)) | (df['id2'].isin(other_oj_subpop_id_dict))
+            ]
+            other_oj_pop_size = len(oj_geo_id_dict[other_oj_pop])
+            oj_pop_str = oj_pop[1][0]
+            other_oj_pop_str = other_oj_pop[0] if np.nan not in other_oj_pop else 'unknown'
+            pop_pair_str = f'{oj_pop[0]}_{other_oj_pop_str}OJ'
+            ## use the condition "oj_pop[0] > other_oj_pop_str" to avoid replicate pairs, i.e. A & B and B & A
+            if oj_pop_size > 0 and other_oj_pop_size > 0 and oj_pop_str > other_oj_pop_str:
+                ## Create a string to describe the OJ subgroup-OJ subgroup pair
+                if pop_pair_str not in ojsubpop_other_ojsubpop_mean_pws_ibd_len:
+                    ## value of the dict is initially a list, [sum_of_ibd_lengths, subpop_size1, subpop_size2]
+                    ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str]=[0, oj_pop_size, other_oj_pop_size, {}]
+                ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][0]+=filtered_df['cm_len'].sum()
+            ##################################################
+            # Output the CSV file storing IBD length between each pair of individuals
+            filtered_row_num = filtered_df.shape[0]
+            #print(chr, pop_pair_str, filtered_row_num)
+            for i in range(filtered_row_num):
+                ibd_row = filtered_df.iloc[i]
+                # id is in the form of f'{fid}_{iid}', $fid is a digit
+                id1=ibd_row['id1']
+                id2=ibd_row['id2']
+                ibd_len = ibd_row['cm_len']
+                ###Test
+                #print(ibd_len)
+                ###
+                if id1 in oj_pop_indivs_dict and id2 in other_oj_subpop_id_dict:
+                    ## the prefix should be country name + 'OJ'
+                    id2_prefix = f'{oj_id_geo_dict[id2][0]}-{oj_id_geo_dict[id2][1]}OJ'
+                    oj_other_oj_df.loc[f'{id2_prefix}__{id2}', id1]+=round(float(ibd_len), 5)
+                    ###Test
+                    #print(oj_other_oj_df.loc[f'{id2_prefix}__{id2}', id1])
+                    ###
+                    indiv_pair_key = f'{id1}__{id2}'
+                elif id2 in oj_pop_indivs_dict and id1 in other_oj_subpop_id_dict:
+                    id1_prefix = f'{oj_id_geo_dict[id1][0]}-{oj_id_geo_dict[id1][1]}OJ'
+                    oj_other_oj_df.loc[f'{id1_prefix}__{id1}', id2]+=round(float(ibd_len), 5)
+                    indiv_pair_key = f'{id2}__{id1}'
+                if pop_pair_str in ojsubpop_other_ojsubpop_mean_pws_ibd_len:
+                    #print(pop_pair_str)
+                    #print(ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][3].keys())
+                    if not indiv_pair_key in ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][3]:
+                        ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]=0
+                    ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]+=\
+                        round(float(ibd_len), 5)
+    ##########################################################################################
+    ##########################################################################################
+    # Finally, calculate the mean pairwise IBD length for OJ versus other OJs
+    ## after looping through 22 autosomes
+    ### This dict should have 14*48 items
+    with open("OJ_subpop_inter_mean_pairwise_ibd_length.csv", "a+") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ### This dict should have 14*13/2 items
+        for k, v in ojsubpop_other_ojsubpop_mean_pws_ibd_len.items():
+            if type(v) is list:
+                if len(v)==4:
+                    num_non_zero_ibd_indiv_pairs = len(v[3].keys())
+                    num_possible_pairs = int(v[1])*int(v[2])
+                    num_zeros_to_add = num_possible_pairs - num_non_zero_ibd_indiv_pairs
+                    v[3] = list(v[3].values())
+                    if num_zeros_to_add > 0:
+                        v[3].extend([0]*num_zeros_to_add)
+                    pop1=k.split("_")[0]
+                    pop2="_".join(tuple(k.split("_")[1:]))
+                    mean_v = round(v[0]/num_possible_pairs, 3)
+                    # v[3] is a list
+                    #print(v[3])
+                    ibd_csv_writer.writerow([pop1,pop2,str(mean_v),str(v[1]),str(v[2]),\
+                                             round(st.sem(v[3]), 3)])
+    #################################################################################################
+    ## Additionally, output 14 .csv files storing total IBD length between every pairs of individuals
+    ## after looping through 22 autosomes
+    ### Reference for conversion from df to csv: 
+    ####: https://towardsdatascience.com/how-to-export-pandas-dataframe-to-csv-2038e43d9c03
+    #### Write to an individual CSV file
+    #### "oj_pop" is a tuple in the form like ("Berlin", "Germany", nan, nan), 
+    #### so the second element annotates country
+    oj_other_oj_df.round(decimals=4).to_csv(f"oj_pops_inter_IBD/{oj_pop[0]}_IBD.csv", encoding='utf-8')
+    
+
+if __name__ == '__main__':
+    # warnings.filterwarnings("ignore")
+    # load 902 Jews into variables
+    df_jews = pd.read_csv('Bray2010_Behar1013_Gladstein2019_Kopelman2020_901Jews.csv', header=0)
+    df_otherj = df_jews.loc[lambda x: x['data_source'].str.contains('otherJ$', regex = True)]
+    ## add single-origin French Jews to df_otherJ
+    df_FrenchJ = df_jews.loc[(df_jews['country1']=="France") & (df_jews['country2'].isnull())]
+    ## add single-origin Italian Jews to df_otherJ
+    df_ItalianJ = df_jews.loc[df_jews['country1']=="Italy"]
+    ## Concat three dfs and drop duplicates
+    df_otherj = pd.concat([df_otherj, df_FrenchJ, df_ItalianJ]).drop_duplicates()
+    ## Create two dictionaries according to unique geographic origin
+    df_oj_geo_groups= df_otherj.groupby(['city1', 'country1']).groups
+    ##########################
+    # print(df_oj_geo_groups)
+    oj_geo_id_dict, oj_id_geo_dict = {}, {}
+    
+    ## Other-Jews
+    for key, val in df_oj_geo_groups.items():
+        for ind in val:
+            ## avoid mixed individuals
+            if not np.nan in key: 
+                pass
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            if key not in oj_geo_id_dict: oj_geo_id_dict[key]=[]
+            cat_id = "_".join((fid, iid))
+            oj_geo_id_dict[key].append(cat_id)
+            oj_id_geo_dict[cat_id]=key
+    
+    jewish_pops = []
+    ## use this variable to store population names for all Jews
+    for key in oj_geo_id_dict:
+        if key[0] == "Mosul":
+            pop_el = ('KurdistanOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Ar Raqqah':
+            pop_el = ('SyrianKurdistanOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Mumbai':
+            pop_el = ('IndiaMumbaiOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Thiruvananthapuram':
+            pop_el = ('IndiaCochinOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Tbilisi':
+            pop_el = ('GeorgiaOJ', key)
+            jewish_pops.append(pop_el)
+        else:
+            pop_el = (f'{key[1]}OJ', key)
+            jewish_pops.append(pop_el)
+    
+    #print(jewish_pops)
+    #print(jews_geo_dict)
+    ## Output .csv file for mean pairwise IBD length
+    with open("OJ_subpop_inter_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop1', 'pop2', 'mean_pairwise_IBD_length', 'pop1_size', 'pop2_size', \
+                                 'IBD_len_SE'])
+    
+    ## For shorter computing time, 
+    ## Run multi-processing using non-mixed subpop OJs
+    partial_func = partial(write_oj_oj_pop_pair_ibd, oj_geo_id_dict=oj_geo_id_dict, oj_id_geo_dict=oj_id_geo_dict)
+    ## the pool occupies 23 threads(23 sub-populations of OJ in parallel, including the Italian & French "AJ")
+    ## There should be 23*(23-1)/2 pairs of OJs to compare IBD
+    pool = Pool(23)
+    pool.map(partial_func, jewish_pops)
+    pool.close()
+    pool.join()
+```
+
+### From the analysis above, we found that an "Austro-Hungarian" AJ "ashkenazy1w_ashkenazy1w" from Behar et.al., 2010 is actually the same person as an "Hungarian" AJ "0_pop_11934_5794" from Kopelman et.al., 2020
+
+### Therefore, we follow the earlier annotation from Behar et. al., and remove "0_pop_11934_5794" from our dataset.
+
+
+```bash
+%%bash
+echo -e "
+family_id,individual_id
+TunisiaJew1118,TunisiaJew1118
+TunisiaJew1421,TunisiaJew1421
+TunisiaJew1511,TunisiaJew1511
+TunisiaJew1544,TunisiaJew1544
+TunisiaJew5200,TunisiaJew5200
+0,pop_11907_5159
+0,pop_11910_1599
+0,pop_11910_1599
+0,pop_11910_1613
+0,pop_11910_1683
+0,pop_11910_1804
+0,pop_11910_1818
+0,pop_11910_4524
+0,pop_11910_4568
+0,pop_11910_4574
+0,pop_11910_4656
+0,pop_11915_1161
+IranJew1409,IranJew1409
+IranJew1419,IranJew1419
+IranJew1557,IranJew1557
+0,pop_11916_1418
+0,pop_11916_1444
+0,pop_11931_1953
+KurdJew1551,KurdJew1551
+KurdJew1824,KurdJew1824
+KurdJew1580,KurdJew1580
+KurdJew1592,KurdJew1592
+KurdJew4633,KurdJew4633
+KurdJew4663,KurdJew4663
+LibyaJew1579,LibyaJew1579
+eth_jew14,eth_jew14
+KurdJew1592,KurdJew1592
+MorJew2001,MorJew2001
+single-Belarus-sample,119
+single-Poland-sample,068
+0,pop_11934_5794
+" > jews_to_delete.csv
+```
+
+```python
+import pandas as pd
+
+jews_935_df = pd.read_csv("../Jews_Genetics_Project/pre_QC_935_Jews_annotation.csv")
+print(jews_935_df.shape)
+jews_to_delete_df = pd.read_csv("jews_to_delete.csv")
+iids_to_delete_dict = {v: k for k, v in dict(jews_to_delete_df['individual_id']).items()}
+print(len(iids_to_delete_dict.items()))
+filtered_jews_df = jews_935_df.loc[~(jews_935_df['individual_id'].isin(iids_to_delete_dict))].reset_index()
+filtered_jews_df = filtered_jews_df.drop(['index'], axis=1)
+print(filtered_jews_df)
+filtered_jews_df.to_csv("Bray2010_Behar1013_Gladstein2019_Kopelman2020_901Jews.csv", index=None)
+```
+
+    (935, 11)
+    34
+                    data_source     family_id individual_id  latitude1  \
+    0      Kopelman_2020_148_AJ             0  pop_917_5750    41.8960   
+    1    Kopelman2020_239otherJ             0   pop_920_155    36.3450   
+    2    Kopelman2020_239otherJ             0   pop_920_174    36.3450   
+    3    Kopelman2020_239otherJ             0   pop_920_209    36.3450   
+    4    Kopelman2020_239otherJ             0  pop_920_1551    36.3450   
+    ..                      ...           ...           ...        ...   
+    896   Behar_2010_100_otherJ  Yemen_Jew_11  Yemen_Jew_11    15.3547   
+    897   Behar_2010_100_otherJ  Yemen_Jew_12  Yemen_Jew_12    15.3547   
+    898   Behar_2010_100_otherJ  Yemen_Jew_13  Yemen_Jew_13    15.3547   
+    899   Behar_2010_100_otherJ  Yemen_Jew_14  Yemen_Jew_14    15.3547   
+    900   Behar_2010_100_otherJ  Yemen_Jew_15  Yemen_Jew_15    15.3547   
+    
+         longtitude1  city1 country1  latitude2  longtitude2 city2 country2  
+    0        12.4833   Rome    Italy        NaN          NaN   NaN      NaN  
+    1        43.1450  Mosul     Iraq        NaN          NaN   NaN      NaN  
+    2        43.1450  Mosul     Iraq        NaN          NaN   NaN      NaN  
+    3        43.1450  Mosul     Iraq        NaN          NaN   NaN      NaN  
+    4        43.1450  Mosul     Iraq        NaN          NaN   NaN      NaN  
+    ..           ...    ...      ...        ...          ...   ...      ...  
+    896      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    897      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    898      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    899      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    900      44.2066  Sanaa    Yemen        NaN          NaN   NaN      NaN  
+    
+    [901 rows x 11 columns]
+
+
+
+```bash
+%%bash
+head -n5 Bray2010_Behar1013_Gladstein2019_Kopelman2020_901Jews.csv &&
+rm Bray2010_Behar1013_Gladstein2019_Kopelman2020_902Jews.csv
+```
+
+    data_source,family_id,individual_id,latitude1,longtitude1,city1,country1,latitude2,longtitude2,city2,country2
+    Kopelman_2020_148_AJ,0,pop_917_5750,41.896,12.4833,Rome,Italy,,,,
+    Kopelman2020_239otherJ,0,pop_920_155,36.345,43.145,Mosul,Iraq,,,,
+    Kopelman2020_239otherJ,0,pop_920_174,36.345,43.145,Mosul,Iraq,,,,
+    Kopelman2020_239otherJ,0,pop_920_209,36.345,43.145,Mosul,Iraq,,,,
+
+
+### Therefore, 33 individuals, including 2 AJs and 31 other Jews were filtered out. 
+### After filtering, we have 288 single-origin AJs, 221 mixed-origin AJs and 393 other Jews, i.e. 509 AJs and 393 OJs.
+
+
+### Hence, let's run IBD analyses using the new annotation file consisting of 901 Jews.
+### Additionally,  we would like to extract specified inter-population or intra-population IBD segments at 22 autosomes to a file for each pair.
+
+
+#### Extracting IBD between AJs and non-Jews
+```bash
+%%bash
+mkdir -p IBD_segments_AJ_subpop_vs_76_nonJ_pop
+```
+
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+import re
+
+'''
+There're 901 modern Jewish individuals in total, including 508 Ashkenazic Jews(AJ) and 393 other Jews(OJ).
+This script presents average IBD segment length per pair in Centimorgans.
+'''
+
+def write_aj_otherpop_pair_ibd(aj_subpop: tuple, aj_geo_id_dict: dict, nj_pop_id_dict: dict, \
+                              aj_id_geo_dict: dict, nj_id_pop_dict: dict):
+    # One CSV file as output from a pandas.dataframe per AJ subpop (14*2 CSV files in total)
+    ## Two dataframes to store total IBD length between every pair of individuals
+    nj_row_names = []
+    for nj_id in nj_id_pop_dict.keys(): 
+        nj_row_names.append(f'{nj_id_pop_dict[nj_id]}__{nj_id}')
+    nj_ajsub_df = pd.DataFrame(columns=list(aj_geo_id_dict[aj_subpop]), index=nj_row_names)
+    for aj_id in aj_geo_id_dict[aj_subpop]:
+        nj_ajsub_df[aj_id]=0
+    # Use this dict the store the following key:value pair
+    ## f'{AJ_SUBPOP_NAME}_{OTHER_SUBPOP_NAME}'(key): mean pairwise IBD length(float)
+    ajsubpop_njpop_mean_pws_ibd_len= {}
+    aj_pop_str = aj_subpop[1] if np.nan not in aj_subpop[:2] else 'unknown'
+    ## key should be $nj_pop, value should be a dataframe of selected IBd segments
+    nj_pop_ibd_seg_df_dict = {
+        nj_pop: pd.DataFrame(columns=[str(i) for i in range(12)]) for nj_pop in nj_pop_id_dict.keys()
+    }
+    for chr in range(1, 23):
+        # print(chr)
+        # Calculate pairwise IBD length and average lod score of IBD segments for 
+        ## each non-mixed & unknown AJ sub-groups (14 in total) against other non-AJ populations
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        df = df.loc[(df['id1'].isin({el: '' for el in aj_geo_id_dict[aj_subpop]}))|\
+                   (df['id2'].isin({el: '' for el in aj_geo_id_dict[aj_subpop]}))]
+        if chr == 1: 
+            for ibd_seg_df in nj_pop_ibd_seg_df_dict.values(): 
+                ibd_seg_df.columns = list(df.columns)
+        # obtain the number of individuals from this AJ subgroup
+        aj_subpop_size = len(aj_geo_id_dict[aj_subpop])
+        ##########################################################################
+        ##########################################################################
+        ## Against NJs from 76 populations
+        for nj_pop in nj_pop_id_dict.keys():
+            ## Create an empty dataframe
+            filtered_df = pd.DataFrame(columns=list(df.columns))
+            #########################################################
+            # Filter into the corresponding IBD segments
+            for iid in list(nj_pop_id_dict[nj_pop]):
+                # 'id' of NJ consists of fid and iid, like f"{fid}_{iid}"
+                filtered_df_sub = df.loc[(df['id1'].str.endswith(f'_{iid}'))|(df['id2'].str.endswith(f'_{iid}'))]
+                filtered_df = pd.concat([filtered_df, filtered_df_sub])
+            nj_pop_ibd_seg_df_dict[nj_pop] = pd.concat([nj_pop_ibd_seg_df_dict[nj_pop], filtered_df])
+            nj_pop_size = len(nj_pop_id_dict[nj_pop])
+            pop_pair_str = f'{aj_pop_str}AJ_{nj_pop}'
+            num_possible_pairs = aj_subpop_size * nj_pop_size
+            if aj_subpop_size > 0 and nj_pop_size > 0:
+                pairwise_avg_ibd_len = round(filtered_df['cm_len'].sum()/num_possible_pairs, 3)
+                ## Create a string to describe the AJ subgroup-NJ group pair
+                if pop_pair_str not in ajsubpop_njpop_mean_pws_ibd_len:
+                    ## value of the dict is initially a list, [sum_of_ibd_lengths, subpop_size1, subpop_size2]
+                    ### The 4th element records IBD length of each pair between 2 pops
+                    ajsubpop_njpop_mean_pws_ibd_len[pop_pair_str]=[0, aj_subpop_size, nj_pop_size, {}]
+                ajsubpop_njpop_mean_pws_ibd_len[pop_pair_str][0]+=filtered_df['cm_len'].sum()
+            ##################################################
+            # Output the CSV file storing IBD length between each pair of individuals
+            filtered_row_num, col_num = filtered_df.shape
+            # Loop through every found individual pair
+            for i in range(filtered_row_num):
+                ibd_row = filtered_df.iloc[i]
+                # id is in the form of f'{fid}_{iid}', $fid is a digit
+                id1=ibd_row['id1']
+                iid1 = "_".join(tuple(id1.split("_")[1:]))
+                id2=ibd_row['id2']
+                iid2 = "_".join(tuple(id2.split("_")[1:]))
+                ibd_len = ibd_row['cm_len']
+                if id1 in aj_id_geo_dict and iid2 in nj_id_pop_dict:
+                    nj_ajsub_df.loc[f'{nj_id_pop_dict[iid2]}__{iid2}', id1]+=round(float(ibd_len), 5)
+                    indiv_pair_key = f'{id1}_{id2}'
+                    if not indiv_pair_key in ajsubpop_njpop_mean_pws_ibd_len[pop_pair_str][3]:
+                        ajsubpop_njpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]=0
+                    ajsubpop_njpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]+=round(float(ibd_len), 5)
+                elif iid1 in nj_id_pop_dict and id2 in aj_id_geo_dict:
+                    nj_ajsub_df.loc[f'{nj_id_pop_dict[iid1]}__{iid1}', id2]+=round(float(ibd_len), 5)
+                    indiv_pair_key = f'{id2}_{id1}'
+                    if not indiv_pair_key in ajsubpop_njpop_mean_pws_ibd_len[pop_pair_str][3]:
+                        ajsubpop_njpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]=0
+                    ajsubpop_njpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]+=round(float(ibd_len), 5)
+    ##########################################################################################
+    # Finally, output IBD segments between AJ pop and each NJ pop to 76 CSV files
+    for nj_pop, ibd_seg_df in nj_pop_ibd_seg_df_dict.items():
+        ibd_seg_df.to_csv(f"IBD_segments_AJ_subpop_vs_76_nonJ_pop/{aj_subpop[1]}AJ__{nj_pop}_IBD_segs.csv", 
+                           encoding='utf-8', index=False)
+    # Calculate the mean pairwise IBD length for AJ versus NJ pairs
+    ## after looping through 22 autosomes
+    ### This dict should have 14*76 items
+    with open("AJ_subpop_vs_76_nonJ_pop_mean_pairwise_ibd_length.csv", "a+") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        for k, v in ajsubpop_njpop_mean_pws_ibd_len.items():
+            if type(v) is list:
+                # print(v)
+                if len(v)==4: 
+                    # Finally, convert ajsubpop_njpop_mean_pws_ibd_len[pop_pair_str][3] to a list of values
+                    ## And extend a list of zeros according to size of keys in this dict 
+                    ### for calculating standard deviation
+                    num_non_zero_ibd_indiv_pairs = len(v[3].keys())
+                    num_possible_pairs = v[1]*v[2]
+                    num_zeros_to_add = num_possible_pairs - num_non_zero_ibd_indiv_pairs
+                    v[3]=list(v[3].values())
+                    if num_zeros_to_add > 0:
+                        v[3].extend([0]*num_zeros_to_add)
+                    pop1=k.split("_")[0]
+                    pop2="_".join(tuple(k.split("_")[1:]))
+                    mean_v=round(v[0]/num_possible_pairs, 3)
+                    # v[3] is a list
+                    ibd_csv_writer.writerow([pop1,pop2,str(mean_v),str(v[1]),str(v[2]), round(st.sem(v[3]), 3)])
+    ##########################################################################################
+    # Additionally, output 14*2 .csv files storing total IBD length between every pairs of individuals
+    ## after looping through 22 autosomes
+    ### Reference for conversion from df to csv: 
+    ####: https://towardsdatascience.com/how-to-export-pandas-dataframe-to-csv-2038e43d9c03
+    nj_ajsub_df.to_csv(f"{aj_subpop[1]}AJ_nonJew.csv", encoding='utf-8')
+    
+
+if __name__ == '__main__':
+    #warnings.filterwarnings("ignore")
+    # load 901 Jews into variables
+    df_jews = pd.read_csv('Bray2010_Behar1013_Gladstein2019_Kopelman2020_901Jews.csv', header=0)
+    df_aj = df_jews.loc[lambda x: x['data_source'].str.contains('AJ$', regex = True)]
+    ## Create two dictionaries according to unique geographic origin
+    df_aj_geo_groups= df_aj.groupby(['city1', 'country1', 'city2', 'country2']).groups
+    aj_geo_id_dict, aj_id_geo_dict= {}, {}
+    
+    ## non-mixed & unknown AJs, city2 & country2 must be nan
+    for key, val in df_aj_geo_groups.items():
+        for ind in val:
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            cat_id = "_".join((fid, iid))
+            ## If non nan are present in key(a tuple of 4 elements) it's a mixed indiv, pass
+            if not np.nan in key: 
+                pass
+            ## only NaN in key, thus being geographically unknown
+            #elif len(set(key)) == 1:
+                #pass
+            elif not "Italy" in key and not "France" in key:
+                if key not in aj_geo_id_dict: aj_geo_id_dict[key]=[]  
+                aj_geo_id_dict[key].append(cat_id)
+                aj_id_geo_dict[cat_id]=key
+    
+    ## Non-Jews from 76 extra ethnic groups
+    nj_pop_id_dict, nj_id_pop_dict = {}, {}
+    with open("76pop_non_jews_id_file_list.txt", "r") as f:
+        for line in f:
+            pop_name=line.strip().split("/")[2].split(".")[0]
+            if pop_name not in nj_pop_id_dict: nj_pop_id_dict[pop_name]=[]
+            with open(line.strip(), "r") as id_f:
+                for line in id_f:
+                    iid=line.strip()
+                    nj_pop_id_dict[pop_name].append(iid)
+                    if iid not in nj_id_pop_dict: nj_id_pop_dict[iid]=pop_name
+    
+    ## Output .csv file for mean pairwise IBD length
+    with open("AJ_subpop_vs_76_nonJ_pop_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop1', 'pop2', 'mean_pairwise_IBD_length', 'pop1_size', 'pop2_size', \
+                                 'IBD_len_SE'])
+    
+    # For shorter computing time, 
+    ## Run multi-processing using non-mixed & unknown subpop groups in AJs
+    partial_func = partial(write_aj_otherpop_pair_ibd, aj_geo_id_dict=aj_geo_id_dict, \
+        nj_pop_id_dict=nj_pop_id_dict, aj_id_geo_dict=aj_id_geo_dict, nj_id_pop_dict=nj_id_pop_dict)
+    # the pool occupies 14 threads(14 sub-populations of AJ in parallel, excluding the Italian & French "AJ")
+    pool = Pool(14)
+    pool.map(partial_func, list(aj_geo_id_dict.keys()))
+    pool.close()
+    pool.join()
+```
+
+
+#### Extracting IBD between AJs and other Jews
+```bash
+%%bash
+mkdir -p IBD_segments_AJ_subpop_vs_23_otherJ_pop
+```
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import re
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+
+'''
+There're 901 modern Jewish individuals in total, including 508 Ashkenazic Jews(AJ) and 393 other Jews(OJ).
+This script presents average IBD segment length per pair in Centimorgans.
+'''
+
+def write_aj_otherpop_pair_ibd(aj_subpop: tuple, aj_geo_id_dict: dict, oj_geo_id_dict: dict, \
+                               aj_id_geo_dict: dict, oj_id_geo_dict: dict):
+    # One CSV file as output from a pandas.dataframe per AJ subpop (14*2 CSV files in total)
+    ## Two dataframes to store total IBD length between every pair of individuals
+    aj_subpop_size = len(aj_geo_id_dict[aj_subpop])
+    oj_row_names = []
+    for oj_id in oj_id_geo_dict.keys(): 
+        oj_col_prefix = f'{oj_id_geo_dict[oj_id][0]}-{oj_id_geo_dict[oj_id][1]}'
+        oj_row_names.append(f'{oj_col_prefix}__{oj_id}')
+    oj_ajsub_df = pd.DataFrame(columns=list(aj_geo_id_dict[aj_subpop]), index=oj_row_names)
+    for aj_id in aj_geo_id_dict[aj_subpop]:
+        oj_ajsub_df[aj_id]=0
+    # Use this dict the store the following key:value pair
+    ## f'{AJ_SUBPOP_NAME}_{OTHER_SUBPOP_NAME}'(key): mean pairwise IBD length(float)
+    ajsubpop_ojsubpop_mean_pws_ibd_len = {}
+    aj_pop_str = aj_subpop[1] if np.nan not in aj_subpop[:2] else 'unknown'
+    oj_pop_ibd_seg_df_dict = {
+        f'{oj_pop[0]}-{oj_pop[1]}OJ': 
+            pd.DataFrame(columns=[str(i) for i in range(12)]) for oj_pop in oj_geo_id_dict.keys()
+    }
+    for chr in range(1, 23):
+        # Calculate pairwise IBD length and average lod score of IBD segments for 
+        ## each non-mixed & unknown AJ sub-groups (14 in total, including unknown ones) against other non-AJ populations
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        df = df.loc[(df['id1'].isin({el: '' for el in aj_geo_id_dict[aj_subpop]}))|\
+                   (df['id2'].isin({el: '' for el in aj_geo_id_dict[aj_subpop]}))]
+        # obtain the number of individuals from this AJ subgroup
+        ##########################################################################
+        ##########################################################################
+        ## Against 393 OJs  
+        for oj_pop in oj_geo_id_dict.keys():
+            #########################################################
+            # Filter into the corresponding IBD segments
+            filtered_df = df.loc[(df['id1'].isin({el: '' for el in oj_geo_id_dict[oj_pop]}))|\
+              (df['id2'].isin({el: '' for el in oj_geo_id_dict[oj_pop]}))]
+            if chr == 1: 
+                for ibd_seg_df in oj_pop_ibd_seg_df_dict.values(): 
+                    ibd_seg_df.columns = list(filtered_df.columns)
+            oj_pop_size = len(oj_geo_id_dict[oj_pop])
+            oj_pop_str = f'{oj_pop[0]}-{oj_pop[1]}' if np.nan not in oj_pop else 'unknown'
+            oj_pop_ibd_seg_df_dict[f'{oj_pop_str}OJ'] = \
+                pd.concat([oj_pop_ibd_seg_df_dict[f'{oj_pop_str}OJ'], filtered_df])
+            pop_pair_str = f'{aj_pop_str}AJ_{oj_pop_str}OJ'
+            if aj_subpop_size > 0 and oj_pop_size > 0:
+                ## Create a string to describe the AJ subgroup-OJ subgroup pair
+                if pop_pair_str not in ajsubpop_ojsubpop_mean_pws_ibd_len:
+                    ## value of the dict is initially a list, [sum_of_ibd_lengths, subpop_size1, subpop_size2]
+                    ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str]=[0, aj_subpop_size, oj_pop_size, {}]
+                ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str][0]+=filtered_df['cm_len'].sum()
+            ##################################################
+            # Output the CSV file storing IBD length between each pair of individuals
+            filtered_row_num, col_num = filtered_df.shape
+            for i in range(filtered_row_num):
+                ibd_row = filtered_df.iloc[i]
+                # id is in the form of f'{fid}_{iid}', $fid is a digit
+                id1=ibd_row['id1']
+                id2=ibd_row['id2']
+                ibd_len = ibd_row['cm_len']
+                ###Test
+                #print(ibd_len)
+                ###
+                if id1 in aj_id_geo_dict and id2 in oj_id_geo_dict:
+                    id2_prefix = f'{oj_id_geo_dict[id2][0]}-{oj_id_geo_dict[id2][1]}'
+                    oj_ajsub_df.loc[f'{id2_prefix}__{id2}', id1]+=round(float(ibd_len), 5)
+                    ###Test
+                    #print(oj_ajsub_df.loc[f'{id2_prefix}_{id2}', id1])
+                    ###
+                    indiv_pair_key = f'{id1}_{id2}'
+                    if not indiv_pair_key in ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str][3]:
+                        ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]=0
+                    ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]+=round(float(ibd_len), 5)
+                elif id1 in oj_id_geo_dict and id2 in aj_id_geo_dict:
+                    id1_prefix = f'{oj_id_geo_dict[id1][0]}-{oj_id_geo_dict[id1][1]}'
+                    oj_ajsub_df.loc[f'{id1_prefix}__{id1}', id2]+=round(float(ibd_len), 5)
+                    #print(oj_ajsub_df.loc[f'{id1_prefix}_{id1}', id2])
+                    indiv_pair_key = f'{id2}_{id1}'
+                    if not indiv_pair_key in ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str][3]:
+                        ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]=0
+                    ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]+=round(float(ibd_len), 5)
+                    ###Test
+                    #print(ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key])
+                    ###
+    ##########################################################################################
+    ##########################################################################################
+    for oj_pop, ibd_seg_df in oj_pop_ibd_seg_df_dict.items():
+        ibd_seg_df.to_csv(f"IBD_segments_AJ_subpop_vs_23_otherJ_pop/{aj_subpop[1]}AJ__{oj_pop}_IBD_segs.csv", 
+                           encoding='utf-8', index=False)
+    # Finally, calculate the mean pairwise IBD length for AJ versus OJ and AJ versus NJ pairs
+    ## after looping through 22 autosomes
+    ### This dict should have 14*23 items
+    with open("AJ_subpop_vs_otherJew_23_subpop_mean_pairwise_ibd_length.csv", "a+") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ### This dict should have 14*22 items
+        for k, v in ajsubpop_ojsubpop_mean_pws_ibd_len.items():
+            if type(v) is list:
+                if len(v)==4:
+                    # Finally, convert ajsubpop_ojsubpop_mean_pws_ibd_len[pop_pair_str][3] to a list of values
+                    ## And extend a list of zeros according to size of keys in this dict 
+                    ### for calculating standard deviation
+                    #print(v[3])
+                    num_non_zero_ibd_indiv_pairs = len(v[3].keys())
+                    num_possible_pairs = int(v[1])*int(v[2])
+                    num_zeros_to_add = num_possible_pairs - num_non_zero_ibd_indiv_pairs
+                    v[3] = list(v[3].values())
+                    if num_zeros_to_add > 0:
+                        v[3].extend([0]*num_zeros_to_add)
+                    pop1=k.split("_")[0]
+                    pop2="_".join(tuple(k.split("_")[1:]))
+                    mean_v = round(v[0]/num_possible_pairs, 3)
+                    # v[3] is a list
+                    #print(v[3])
+                    ibd_csv_writer.writerow([pop1,pop2,str(mean_v),str(v[1]),str(v[2]),round(st.sem(v[3]), 3)])
+    ##########################################################################################
+    # Additionally, output 14*2 .csv files storing total IBD length between every pairs of individuals
+    ## after looping through 22 autosomes
+    ### Reference for conversion from df to csv: 
+    ####: https://towardsdatascience.com/how-to-export-pandas-dataframe-to-csv-2038e43d9c03
+    oj_ajsub_df.to_csv(f"{aj_subpop[1]}AJ_otherJew.csv", encoding='utf-8')
+    
+
+if __name__ == '__main__':
+    # warnings.filterwarnings("ignore")
+    # load 901 Jews into variables
+    df_jews = pd.read_csv('Bray2010_Behar1013_Gladstein2019_Kopelman2020_901Jews.csv', header=0)
+    df_aj = df_jews.loc[lambda x: x['data_source'].str.contains('AJ$', regex = True)]
+    df_otherj = df_jews.loc[lambda x: x['data_source'].str.contains('otherJ$', regex = True)]
+    ## add single-origin French Jews to df_otherJ
+    df_FrenchJ = df_jews.loc[(df_jews['country1']=="France") & (df_jews['country2'].isnull())]
+    ## add single-origin Italian Jews to df_otherJ
+    df_ItalianJ = df_jews.loc[df_jews['country1']=="Italy"]
+    ## Concat three dfs and drop duplicates
+    df_otherj = pd.concat([df_otherj, df_FrenchJ, df_ItalianJ]).drop_duplicates()
+    ## Create two dictionaries according to unique geographic origin
+    df_aj_geo_groups= df_aj.groupby(['city1', 'country1', 'city2', 'country2']).groups
+    df_oj_geo_groups= df_otherj.groupby(['city1', 'country1']).groups
+    ##########################
+    # print(df_oj_geo_groups)
+    
+    aj_geo_id_dict, oj_geo_id_dict = {}, {}
+    aj_id_geo_dict, oj_id_geo_dict = {}, {}
+    
+    ## non-mixed & unknown AJs, city2 & country2 must be nan
+    for key, val in df_aj_geo_groups.items():
+        for ind in val:
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            cat_id = "_".join((fid, iid))
+            ## If non nan are present in key(a tuple of 4 elements) it's a mixed indiv, pass
+            if not np.nan in key: 
+                pass
+            ## only NaN in key, thus being geographically unknown
+            #elif len(set(key)) == 1:
+                #pass
+            elif not "Italy" in key and not "France" in key:
+                if key not in aj_geo_id_dict: aj_geo_id_dict[key]=[]  
+                aj_geo_id_dict[key].append(cat_id)
+                aj_id_geo_dict[cat_id]=key
+    
+    ## Other-Jews
+    for key, val in df_oj_geo_groups.items():
+        for ind in val:
+            ## avoid mixed individuals
+            if not np.nan in key: 
+                pass
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            if key not in oj_geo_id_dict: oj_geo_id_dict[key]=[]
+            cat_id = "_".join((fid, iid))
+            oj_geo_id_dict[key].append(cat_id)
+            oj_id_geo_dict[cat_id]=key
+    
+    ## Output .csv file for mean pairwise IBD length
+    with open("AJ_subpop_vs_otherJew_23_subpop_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop1', 'pop2', 'mean_pairwise_IBD_length', 'pop1_size', 'pop2_size', \
+                                 'IBD_len_SE'])
+    
+    # For shorter computing time, 
+    ## Run multi-processing using non-mixed & unknown subpop groups in AJs
+    partial_func = partial(write_aj_otherpop_pair_ibd, aj_geo_id_dict=aj_geo_id_dict, \
+        oj_geo_id_dict=oj_geo_id_dict, aj_id_geo_dict=aj_id_geo_dict, oj_id_geo_dict=oj_id_geo_dict)
+    # the pool occupies 14 threads(14 sub-populations of AJ in parallel)
+    pool = Pool(14)
+    pool.map(partial_func, list(aj_geo_id_dict.keys()))
+    pool.close()
+    pool.join()
+```
+
+#### Extracting IBD within each Jewish community
+```bash
+%%bash
+mkdir -p Jewish_pop_intra_IBD -p IBD_segments_intra_Jewish_pops
+```
+
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+import re
+
+'''
+There're 901 modern Jewish individuals in total, including 508 Ashkenazic Jews(AJ) and 393 other Jews(OJ).
+This script presents average IBD segment length per pair in Centimorgans.
+'''
+
+def write_jew_intra_pop_pair_ibd(jew_pop: tuple, jew_geo_id_dict: dict):
+    ## jew_pop is a tuple of two elements. 
+    ### The first element is the real name of Jewish population. 
+    ### The second element is its key at jew_geo_id_dict
+    jew_pop_indivs = jew_geo_id_dict[jew_pop[1]]
+    ## obtain the number of individuals from this Jewish population
+    jew_pop_size = len(jew_pop_indivs)
+    ## If n<3, we should not calculate intra-group IBD 
+    if jew_pop_size < 2: return
+    ## exclude IBD between two haplotypes of the same individual
+    num_indiv_pairs = jew_pop_size*(jew_pop_size-1)/2
+    jew_indiv_pair_ibd_dict = {}
+    jew_pop_intra_ibd_seg_df = pd.DataFrame(columns=[str(i) for i in range(12)])
+    for i in range(jew_pop_size):
+        for j in range(i+1, jew_pop_size):
+            iid1, iid2 = jew_pop_indivs[i], jew_pop_indivs[j]
+            jew_indiv_pair_ibd_dict[f'{iid1}__{iid2}'] = 0
+    ## Create a dataframe to store sums of intra-population individual pairwise IBD length
+    ### Output the dataframe into a csv file later
+    jew_pop_intra_df = pd.DataFrame(columns=['IBD_cM'], index=list(jew_indiv_pair_ibd_dict.keys()))
+    jew_pop_intra_df['IBD_cM'] = 0
+    #print(jew_pop_intra_df.index)
+    ## Loop through 22 autosomes
+    for chr in range(1, 23):
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        pop_intra_df = df.loc[\
+                (df['id1'].isin({iid: "" for iid in jew_pop_indivs})) & 
+                (df['id2'].isin({iid: "" for iid in jew_pop_indivs})) 
+            ]
+        if chr == 1: 
+            jew_pop_intra_ibd_seg_df.columns = list(pop_intra_df.columns)
+        jew_pop_intra_ibd_seg_df = pd.concat([jew_pop_intra_ibd_seg_df, pop_intra_df])
+        ibd_row_num = pop_intra_df.shape[0]
+        for i in range(ibd_row_num):
+            ibd_row = pop_intra_df.iloc[i]
+            # id is in the form of f'{fid}_{iid}', $fid is a digit
+            iid1=ibd_row['id1']
+            iid2=ibd_row['id2']
+            ibd_len = ibd_row['cm_len']
+            #print(iid1, iid2)
+            if f'{iid1}__{iid2}' in jew_indiv_pair_ibd_dict:
+                #print("matched")
+                jew_pop_intra_df.loc[f'{iid1}__{iid2}', 'IBD_cM']+=round(float(ibd_len), 5)
+            elif f'{iid2}__{iid1}' in jew_indiv_pair_ibd_dict:
+                #print("matched")
+                jew_pop_intra_df.loc[f'{iid2}__{iid1}', 'IBD_cM']+=round(float(ibd_len), 5)
+    ## Write the dataframe of selected IBD segments to CSV file
+    jew_pop_intra_ibd_seg_df.to_csv(f"IBD_segments_intra_Jewish_pops/{jew_pop[0]}_IBD_segs.csv", 
+                           encoding='utf-8', index=False)
+    ## Write to the general CSV file
+    with open("all_Jewish_subpops_intra_mean_pairwise_ibd_length.csv", "a") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        mean_v = round(jew_pop_intra_df['IBD_cM'].sum()/num_indiv_pairs, 3)
+        ibd_csv_writer.writerow([jew_pop[0], str(mean_v), jew_pop_size, \
+                                 round(st.sem(jew_pop_intra_df['IBD_cM'].tolist()), 3)])
+    ## Write to an individual CSV file
+    ## "jew_pop" is a tuple in the form like ("Berlin", "Germany", nan, nan), 
+    ### so the second element annotates country
+    jew_pop_intra_df.round(decimals=4).to_csv(f"Jewish_pop_intra_IBD/{jew_pop[0]}_intraIBD.csv", encoding='utf-8')
+    
+
+if __name__ == '__main__':
+    # warnings.filterwarnings("ignore")
+    # load 901 Jews into variables
+    df_jews = pd.read_csv('Bray2010_Behar1013_Gladstein2019_Kopelman2020_901Jews.csv', header=0)
+    df_aj = df_jews.loc[lambda x: x['data_source'].str.contains('AJ$', regex = True)]
+    df_otherj = df_jews.loc[lambda x: x['data_source'].str.contains('otherJ$', regex = True)]
+    ## add single-origin French Jews to df_otherJ
+    df_FrenchJ = df_jews.loc[(df_jews['country1']=="France") & (df_jews['country2'].isnull())]
+    ## add single-origin Italian Jews to df_otherJ
+    df_ItalianJ = df_jews.loc[df_jews['country1']=="Italy"]
+    ## Concat three dfs and drop duplicates
+    df_otherj = pd.concat([df_otherj, df_FrenchJ, df_ItalianJ]).drop_duplicates()
+    ## Create two dictionaries according to unique geographic origin
+    df_aj_geo_groups= df_aj.groupby(['city1', 'country1', 'city2', 'country2']).groups
+    df_oj_geo_groups= df_otherj.groupby(['city1', 'country1']).groups
+    ##########################
+    # print(df_oj_geo_groups)
+    
+    aj_geo_id_dict, oj_geo_id_dict = {}, {}
+    
+    ## non-mixed & unknown AJs, city2 & country2 must be nan
+    for key, val in df_aj_geo_groups.items():
+        for ind in val:
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            cat_id = "_".join((fid, iid))
+            ## If non nan are present in key(a tuple of 4 elements) it's a mixed indiv, pass
+            if not np.nan in key: 
+                pass
+            ## only NaN in key, thus being geographically unknown
+            #elif len(set(key)) == 1:
+                #pass
+            elif not "Italy" in key and not "France" in key:
+                if key not in aj_geo_id_dict: aj_geo_id_dict[key]=[]  
+                aj_geo_id_dict[key].append(cat_id)
+    
+    ## Other-Jews
+    for key, val in df_oj_geo_groups.items():
+        for ind in val:
+            ## avoid mixed individuals
+            if not np.nan in key: 
+                pass
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            if key not in oj_geo_id_dict: oj_geo_id_dict[key]=[]
+            cat_id = "_".join((fid, iid))
+            oj_geo_id_dict[key].append(cat_id)
+    
+    ## use this variable to store population names for all Jews
+    jewish_pops = []
+    for key in aj_geo_id_dict:
+        pop_el = (f'{key[1]}AJ', key)
+        jewish_pops.append(pop_el)
+    for key in oj_geo_id_dict:
+        if key[0] == "Mosul":
+            pop_el = ('KurdistanOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Ar Raqqah':
+            pop_el = ('SyrianKurdistanOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Mumbai':
+            pop_el = ('IndiaMumbaiOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Thiruvananthapuram':
+            pop_el = ('IndiaCochinOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Tbilisi':
+            pop_el = ('GeorgiaOJ', key)
+            jewish_pops.append(pop_el)
+        else:
+            pop_el = (f'{key[1]}OJ', key)
+            jewish_pops.append(pop_el)
+    
+    #print(jewish_pops)
+    aj_geo_id_dict.update(oj_geo_id_dict)
+    jews_geo_dict = aj_geo_id_dict
+    aj_geo_id_dict = None
+    #print(jews_geo_dict)
+    ## Output .csv file for mean pairwise IBD length
+    with open("all_Jewish_subpops_intra_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop', 'mean_pairwise_IBD_length', 'pop_size', 'IBD_len_SE'])
+    
+    ## For shorter computing time, 
+    ## Run multi-processing using non-mixed subpop AJs and OJs
+    partial_func = partial(write_jew_intra_pop_pair_ibd, jew_geo_id_dict=jews_geo_dict)
+    ## the pool occupies 14 threads(14 sub-populations of AJ in parallel, excluding the Italian & French "AJ")
+    ## There should be n*(n-1)/2 pairs within each group to compare IBD
+    ## However, only one Moldavian AJ and one Slovakian AJ are present. 
+    ### Therefore, it does not make sense to investigate these two groups
+    pool = Pool(20)
+    pool.map(partial_func, jewish_pops)
+    pool.close()
+    pool.join()
+```
+
+### In addition, let's write two scripts to extract IBD sharing between different AJ sub-populations and between different OJ sub-populations.
+
+```bash
+%%bash
+mkdir -p aj_pops_inter_IBD -p oj_pops_inter_IBD -p IBD_segments_inter_aj_pops -p IBD_segments_inter_oj_pops
+```
+
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+import re
+
+'''
+There're 901 modern Jewish individuals in total, including 508 Ashkenazic Jews(AJ) and 393 other Jews(other_aj).
+This script presents average IBD segment length per pair in Centimorgans.
+'''
+
+def write_aj_aj_pop_pair_ibd(aj_pop: tuple, aj_geo_id_dict: dict, aj_id_geo_dict: dict):
+    ## aj_pop is a tuple of two elements. 
+    ### The first element is the real name of Jewish population. 
+    ### The second element is its key at aj_geo_id_dict
+    aj_pop_indivs = aj_geo_id_dict[aj_pop[1]]
+    aj_pop_indivs_dict = {iid: "" for iid in aj_pop_indivs}
+    ## obtain the number of individuals from this Jewish population
+    aj_pop_size = len(aj_pop_indivs)
+    other_aj_row_names = []
+    for other_aj_id in aj_id_geo_dict.keys(): 
+        ## the prefix should be country name = "AJ"
+        if aj_id_geo_dict[other_aj_id] == aj_pop[1]: continue
+        other_aj_col_prefix = f'{aj_id_geo_dict[other_aj_id][1]}AJ'
+        other_aj_row_names.append(f'{other_aj_col_prefix}__{other_aj_id}')
+    aj_other_aj_df = pd.DataFrame(columns=aj_pop_indivs, index=other_aj_row_names)
+    for aj_id in aj_pop_indivs:
+        aj_other_aj_df[aj_id]=0
+    # Use this dict the store the following key:value pair
+    ## f'{AJ_SUBPOP_NAME}_{OTHER_SUBPOP_NAME}'(key): mean pairwise IBD length(float)
+    ajsubpop_other_ajsubpop_mean_pws_ibd_len = {}
+    other_aj_pop_ibd_seg_df_dict = {
+        other_aj_pop[1]: pd.DataFrame(columns=[str(i) for i in range(12)]) 
+        for other_aj_pop in aj_geo_id_dict.keys() if not other_aj_pop == aj_pop[1] 
+    }
+    ## Loop through 22 autosomes
+    for chr in range(1, 23):
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        aj_subpop_ibd_df = df.loc[
+            (df['id1'].isin(aj_pop_indivs_dict)) | (df['id2'].isin(aj_pop_indivs_dict)) 
+        ]
+        if chr == 1: 
+            for ibd_seg_df in other_aj_pop_ibd_seg_df_dict.values(): 
+                ibd_seg_df.columns = list(aj_subpop_ibd_df.columns)
+        for other_aj_pop in aj_geo_id_dict.keys():
+            #########################################################
+            # Filter into the corresponding IBD segments
+            if other_aj_pop == aj_pop[1]: continue
+            other_aj_subpop_id_dict = {el: '' for el in aj_geo_id_dict[other_aj_pop]}
+            filtered_df = aj_subpop_ibd_df.loc[
+                (df['id1'].isin(other_aj_subpop_id_dict)) | (df['id2'].isin(other_aj_subpop_id_dict))
+            ]
+            other_aj_pop_size = len(aj_geo_id_dict[other_aj_pop])
+            other_aj_pop_str = other_aj_pop[1] if np.nan not in other_aj_pop else 'unknown'
+            other_aj_pop_ibd_seg_df_dict[other_aj_pop_str] = \
+            pd.concat([other_aj_pop_ibd_seg_df_dict[other_aj_pop_str], filtered_df])
+            pop_pair_str = f'{aj_pop[0]}_{other_aj_pop_str}AJ'
+            ## use the condition "aj_pop[0] > other_aj_pop_str" to avoid replicate pairs, i.e. A & B and B & A
+            if aj_pop_size > 0 and other_aj_pop_size > 0 and aj_pop[0] > other_aj_pop_str:
+                ## Create a string to describe the AJ subgroup-OJ subgroup pair
+                if pop_pair_str not in ajsubpop_other_ajsubpop_mean_pws_ibd_len:
+                    ## value of the dict is initially a list, [sum_of_ibd_lengths, subpop_size1, subpop_size2]
+                    ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str]=[0, aj_pop_size, other_aj_pop_size, {}]
+                ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][0]+=filtered_df['cm_len'].sum()
+            ##################################################
+            # Output the CSV file storing IBD length between each pair of individuals
+            filtered_row_num = filtered_df.shape[0]
+            #print(chr, pop_pair_str, filtered_row_num)
+            for i in range(filtered_row_num):
+                ibd_row = filtered_df.iloc[i]
+                # id is in the form of f'{fid}_{iid}', $fid is a digit
+                id1=ibd_row['id1']
+                id2=ibd_row['id2']
+                ibd_len = ibd_row['cm_len']
+                ###Test
+                #print(ibd_len)
+                ###
+                if id1 in aj_pop_indivs_dict and id2 in other_aj_subpop_id_dict:
+                    ## the prefix should be country name + 'AJ'
+                    id2_prefix = f'{aj_id_geo_dict[id2][1]}AJ'
+                    aj_other_aj_df.loc[f'{id2_prefix}__{id2}', id1]+=round(float(ibd_len), 5)
+                    ###Test
+                    #print(aj_other_aj_df.loc[f'{id2_prefix}__{id2}', id1])
+                    ###
+                    indiv_pair_key = f'{id1}__{id2}'
+                elif id2 in aj_pop_indivs_dict and id1 in other_aj_subpop_id_dict:
+                    id1_prefix = f'{aj_id_geo_dict[id1][1]}AJ'
+                    aj_other_aj_df.loc[f'{id1_prefix}__{id1}', id2]+=round(float(ibd_len), 5)
+                    indiv_pair_key = f'{id2}__{id1}'
+                if pop_pair_str in ajsubpop_other_ajsubpop_mean_pws_ibd_len:
+                    #print(pop_pair_str)
+                    #print(ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][3].keys())
+                    if not indiv_pair_key in ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][3]:
+                        ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]=0
+                    ajsubpop_other_ajsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]+=\
+                        round(float(ibd_len), 5)
+    ##########################################################################################
+    ##########################################################################################
+    for other_aj_pop, ibd_seg_df in other_aj_pop_ibd_seg_df_dict.items():
+        ibd_seg_df.to_csv(f"IBD_segments_inter_aj_pops/{aj_pop[0]}__{other_aj_pop}AJ_IBD_segs.csv", 
+                           encoding='utf-8', index=False)
+    # Finally, calculate the mean pairwise IBD length for AJ versus other AJs
+    ## after looping through 22 autosomes
+    ### This dict should have 14*48 items
+    with open("AJ_subpop_inter_mean_pairwise_ibd_length.csv", "a+") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ### This dict should have 14*13/2 items
+        for k, v in ajsubpop_other_ajsubpop_mean_pws_ibd_len.items():
+            if type(v) is list:
+                if len(v)==4:
+                    num_non_zero_ibd_indiv_pairs = len(v[3].keys())
+                    num_possible_pairs = int(v[1])*int(v[2])
+                    num_zeros_to_add = num_possible_pairs - num_non_zero_ibd_indiv_pairs
+                    v[3] = list(v[3].values())
+                    if num_zeros_to_add > 0:
+                        v[3].extend([0]*num_zeros_to_add)
+                    pop1=k.split("_")[0]
+                    pop2="_".join(tuple(k.split("_")[1:]))
+                    mean_v = round(v[0]/num_possible_pairs, 3)
+                    # v[3] is a list
+                    #print(v[3])
+                    ibd_csv_writer.writerow([pop1,pop2,str(mean_v),str(v[1]),str(v[2]),\
+                                             round(st.sem(v[3]), 3)])
+    #################################################################################################
+    ## Additionally, output 14 .csv files storing total IBD length between every pairs of individuals
+    ## after looping through 22 autosomes
+    ### Reference for conversion from df to csv: 
+    ####: https://towardsdatascience.com/how-to-export-pandas-dataframe-to-csv-2038e43d9c03
+    #### Write to an individual CSV file
+    #### "aj_pop" is a tuple in the form like ("Berlin", "Germany", nan, nan), 
+    #### so the second element annotates country
+    aj_other_aj_df.round(decimals=4).to_csv(f"aj_pops_inter_IBD/{aj_pop[0]}_IBD.csv", encoding='utf-8')
+    
+
+if __name__ == '__main__':
+    # warnings.filterwarnings("ignore")
+    # load 901 Jews into variables
+    df_jews = pd.read_csv('Bray2010_Behar1013_Gladstein2019_Kopelman2020_901Jews.csv', header=0)
+    df_aj = df_jews.loc[lambda x: x['data_source'].str.contains('AJ$', regex = True)]
+    ## Create two dictionaries according to unique geographic origin
+    df_aj_geo_groups= df_aj.groupby(['city1', 'country1', 'city2', 'country2']).groups
+    aj_geo_id_dict, aj_id_geo_dict = {}, {}
+    
+    ## non-mixed & unknown AJs, city2 & country2 must be nan
+    for key, val in df_aj_geo_groups.items():
+        for ind in val:
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            cat_id = "_".join((fid, iid))
+            ## If non nan are present in key(a tuple of 4 elements) it's a mixed indiv, pass
+            if not np.nan in key: 
+                pass
+            ## only NaN in key, thus being geographically unknown
+            #elif len(set(key)) == 1:
+                #pass
+            elif not "Italy" in key and not "France" in key:
+                if key not in aj_geo_id_dict: aj_geo_id_dict[key]=[]  
+                aj_geo_id_dict[key].append(cat_id)
+                aj_id_geo_dict[cat_id]=key
+    
+    ## use this variable to store population names for all Jews
+    jewish_pops = []
+    for key in aj_geo_id_dict:
+        pop_el = (f'{key[1]}AJ', key)
+        jewish_pops.append(pop_el)
+    
+    #print(jewish_pops)
+    ## Output .csv file for mean pairwise IBD length
+    with open("AJ_subpop_inter_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop1', 'pop2', 'mean_pairwise_IBD_length', 'pop1_size', 'pop2_size', \
+                                 'IBD_len_SE'])
+    
+    ## For shorter computing time, 
+    ## Run multi-processing using non-mixed subpop AJs and other_ajs
+    partial_func = partial(write_aj_aj_pop_pair_ibd, aj_geo_id_dict=aj_geo_id_dict, aj_id_geo_dict=aj_id_geo_dict)
+    ## the pool occupies 14 threads(14 sub-populations of AJ in parallel, excluding the Italian & French "AJ")
+    ## There should be 14*(14-1)/2 pairs of AJs to compare IBD
+    ## However, only one Moldavian AJ and one Slovakian AJ are present. 
+    pool = Pool(14)
+    pool.map(partial_func, jewish_pops)
+    pool.close()
+    pool.join()
+```
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+import re
+
+'''
+There're 901 modern Jewish individuals in total, including 508 Ashkenazic Jews(OJ) and 393 other Jews(OJ).
+This script presents average IBD segment length per pair in Centimorgans.
+'''
+
+def write_oj_oj_pop_pair_ibd(oj_pop: tuple, oj_geo_id_dict: dict, oj_id_geo_dict: dict):
+    ## oj_pop is a tuple of two elements. 
+    ### The first element is the real name of Jewish population. 
+    ### The second element is its key at oj_geo_id_dict
+    oj_pop_indivs = oj_geo_id_dict[oj_pop[1]]
+    oj_pop_indivs_dict = {iid: "" for iid in oj_pop_indivs}
+    ## obtain the number of individuals from this Jewish population
+    oj_pop_size = len(oj_pop_indivs)
+    other_oj_row_names = []
+    for other_oj_id in oj_id_geo_dict.keys(): 
+        ## the prefix should be country name = "OJ"
+        if oj_id_geo_dict[other_oj_id] == oj_pop[1]: continue
+        other_oj_col_prefix = f'{oj_id_geo_dict[other_oj_id][0]}-{oj_id_geo_dict[other_oj_id][1]}OJ'
+        other_oj_row_names.append(f'{other_oj_col_prefix}__{other_oj_id}')
+    oj_other_oj_df = pd.DataFrame(columns=oj_pop_indivs, index=other_oj_row_names)
+    for oj_id in oj_pop_indivs:
+        oj_other_oj_df[oj_id]=0
+    # Use this dict the store the following key:value pair
+    ## f'{OJ_SUBPOP_NAME}_{OTHER_SUBPOP_NAME}'(key): mean pairwise IBD length(float)
+    ojsubpop_other_ojsubpop_mean_pws_ibd_len = {}
+    other_oj_pop_ibd_seg_df_dict = {
+        f'{other_oj_pop[0]}-{other_oj_pop[1]}': pd.DataFrame(columns=[str(i) for i in range(12)]) 
+        for other_oj_pop in oj_geo_id_dict.keys() if not other_oj_pop == oj_pop[1]
+    }
+    ## Loop through 22 autosomes
+    for chr in range(1, 23):
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        oj_subpop_ibd_df = df.loc[
+            (df['id1'].isin(oj_pop_indivs_dict)) | (df['id2'].isin(oj_pop_indivs_dict)) 
+        ]
+        if chr == 1: 
+            for ibd_seg_df in other_oj_pop_ibd_seg_df_dict.values(): 
+                ibd_seg_df.columns = list(oj_subpop_ibd_df.columns)
+        for other_oj_pop in oj_geo_id_dict.keys():
+            #########################################################
+            # Filter into the corresponding IBD segments
+            if other_oj_pop == oj_pop[1]: continue
+            other_oj_subpop_id_dict = {el: '' for el in oj_geo_id_dict[other_oj_pop]}
+            filtered_df = oj_subpop_ibd_df.loc[
+                (df['id1'].isin(other_oj_subpop_id_dict)) | (df['id2'].isin(other_oj_subpop_id_dict))
+            ]
+            other_oj_pop_size = len(oj_geo_id_dict[other_oj_pop])
+            oj_pop_str = f'{oj_pop[1][0]}-{oj_pop[1][1]}'
+            other_oj_pop_str = f'{other_oj_pop[0]}-{other_oj_pop[1]}' if np.nan not in other_oj_pop else 'unknown'
+            other_oj_pop_ibd_seg_df_dict[other_oj_pop_str] = \
+            pd.concat([other_oj_pop_ibd_seg_df_dict[other_oj_pop_str], filtered_df])
+            pop_pair_str = f'{oj_pop_str}OJ_{other_oj_pop_str}OJ'
+            ## use the condition "oj_pop[0] > other_oj_pop_str" to avoid replicate pairs, i.e. A & B and B & A
+            if oj_pop_size > 0 and other_oj_pop_size > 0 and oj_pop_str > other_oj_pop_str:
+                ## Create a string to describe the OJ subgroup-OJ subgroup pair
+                if pop_pair_str not in ojsubpop_other_ojsubpop_mean_pws_ibd_len:
+                    ## value of the dict is initially a list, [sum_of_ibd_lengths, subpop_size1, subpop_size2]
+                    ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str]=[0, oj_pop_size, other_oj_pop_size, {}]
+                ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][0]+=filtered_df['cm_len'].sum()
+            ##################################################
+            # Output the CSV file storing IBD length between each pair of individuals
+            filtered_row_num = filtered_df.shape[0]
+            #print(chr, pop_pair_str, filtered_row_num)
+            for i in range(filtered_row_num):
+                ibd_row = filtered_df.iloc[i]
+                # id is in the form of f'{fid}_{iid}', $fid is a digit
+                id1=ibd_row['id1']
+                id2=ibd_row['id2']
+                ibd_len = ibd_row['cm_len']
+                ###Test
+                #print(ibd_len)
+                ###
+                if id1 in oj_pop_indivs_dict and id2 in other_oj_subpop_id_dict:
+                    ## the prefix should be country name + 'OJ'
+                    id2_prefix = f'{oj_id_geo_dict[id2][0]}-{oj_id_geo_dict[id2][1]}OJ'
+                    oj_other_oj_df.loc[f'{id2_prefix}__{id2}', id1]+=round(float(ibd_len), 5)
+                    ###Test
+                    #print(oj_other_oj_df.loc[f'{id2_prefix}__{id2}', id1])
+                    ###
+                    indiv_pair_key = f'{id1}__{id2}'
+                elif id2 in oj_pop_indivs_dict and id1 in other_oj_subpop_id_dict:
+                    id1_prefix = f'{oj_id_geo_dict[id1][0]}-{oj_id_geo_dict[id1][1]}OJ'
+                    oj_other_oj_df.loc[f'{id1_prefix}__{id1}', id2]+=round(float(ibd_len), 5)
+                    indiv_pair_key = f'{id2}__{id1}'
+                if pop_pair_str in ojsubpop_other_ojsubpop_mean_pws_ibd_len:
+                    #print(pop_pair_str)
+                    #print(ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][3].keys())
+                    if not indiv_pair_key in ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][3]:
+                        ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]=0
+                    ojsubpop_other_ojsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]+=\
+                        round(float(ibd_len), 5)
+    ##########################################################################################
+    ##########################################################################################
+    for other_oj_pop, ibd_seg_df in other_oj_pop_ibd_seg_df_dict.items():
+        ibd_seg_df.to_csv(f"IBD_segments_inter_oj_pops/{oj_pop[0]}__{other_oj_pop}OJ_IBD_segs.csv", 
+                           encoding='utf-8', index=False)
+    # Finally, calculate the mean pairwise IBD length for OJ versus other OJs
+    ## after looping through 22 autosomes
+    ### This dict should have 14*48 items
+    with open("OJ_subpop_inter_mean_pairwise_ibd_length.csv", "a+") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ### This dict should have 14*13/2 items
+        for k, v in ojsubpop_other_ojsubpop_mean_pws_ibd_len.items():
+            if type(v) is list:
+                if len(v)==4:
+                    num_non_zero_ibd_indiv_pairs = len(v[3].keys())
+                    num_possible_pairs = int(v[1])*int(v[2])
+                    num_zeros_to_add = num_possible_pairs - num_non_zero_ibd_indiv_pairs
+                    v[3] = list(v[3].values())
+                    if num_zeros_to_add > 0:
+                        v[3].extend([0]*num_zeros_to_add)
+                    pop1=k.split("_")[0]
+                    pop2="_".join(tuple(k.split("_")[1:]))
+                    mean_v = round(v[0]/num_possible_pairs, 3)
+                    # v[3] is a list
+                    #print(v[3])
+                    ibd_csv_writer.writerow([pop1,pop2,str(mean_v),str(v[1]),str(v[2]),\
+                                             round(st.sem(v[3]), 3)])
+    #################################################################################################
+    ## Additionally, output 14 .csv files storing total IBD length between every pairs of individuals
+    ## after looping through 22 autosomes
+    ### Reference for conversion from df to csv: 
+    ####: https://towardsdatascience.com/how-to-export-pandas-dataframe-to-csv-2038e43d9c03
+    #### Write to an individual CSV file
+    #### "oj_pop" is a tuple in the form like ("Berlin", "Germany", nan, nan), 
+    #### so the second element annotates country
+    oj_other_oj_df.round(decimals=4).to_csv(f"oj_pops_inter_IBD/{oj_pop[0]}_IBD.csv", encoding='utf-8')
+    
+
+if __name__ == '__main__':
+    # warnings.filterwarnings("ignore")
+    # load 902 Jews into variables
+    df_jews = pd.read_csv('Bray2010_Behar1013_Gladstein2019_Kopelman2020_901Jews.csv', header=0)
+    df_otherj = df_jews.loc[lambda x: x['data_source'].str.contains('otherJ$', regex = True)]
+    ## add single-origin French Jews to df_otherJ
+    df_FrenchJ = df_jews.loc[(df_jews['country1']=="France") & (df_jews['country2'].isnull())]
+    ## add single-origin Italian Jews to df_otherJ
+    df_ItalianJ = df_jews.loc[df_jews['country1']=="Italy"]
+    ## Concat three dfs and drop duplicates
+    df_otherj = pd.concat([df_otherj, df_FrenchJ, df_ItalianJ]).drop_duplicates()
+    ## Create two dictionaries according to unique geographic origin
+    df_oj_geo_groups= df_otherj.groupby(['city1', 'country1']).groups
+    ##########################
+    # print(df_oj_geo_groups)
+    oj_geo_id_dict, oj_id_geo_dict = {}, {}
+    
+    ## Other-Jews
+    for key, val in df_oj_geo_groups.items():
+        for ind in val:
+            ## avoid mixed individuals
+            if not np.nan in key: 
+                pass
+            fid=df_jews['family_id'].iloc[ind]
+            iid=df_jews['individual_id'].iloc[ind]
+            if key not in oj_geo_id_dict: oj_geo_id_dict[key]=[]
+            cat_id = "_".join((fid, iid))
+            oj_geo_id_dict[key].append(cat_id)
+            oj_id_geo_dict[cat_id]=key
+    
+    jewish_pops = []
+    ## use this variable to store population names for all Jews
+    for key in oj_geo_id_dict:
+        if key[0] == "Mosul":
+            pop_el = ('KurdistanOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Ar Raqqah':
+            pop_el = ('SyrianKurdistanOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Mumbai':
+            pop_el = ('IndiaMumbaiOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Thiruvananthapuram':
+            pop_el = ('IndiaCochinOJ', key)
+            jewish_pops.append(pop_el)
+        elif key[0] == 'Tbilisi':
+            pop_el = ('GeorgiaOJ', key)
+            jewish_pops.append(pop_el)
+        else:
+            pop_el = (f'{key[1]}OJ', key)
+            jewish_pops.append(pop_el)
+    
+    #print(jewish_pops)
+    #print(jews_geo_dict)
+    ## Output .csv file for mean pairwise IBD length
+    with open("OJ_subpop_inter_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop1', 'pop2', 'mean_pairwise_IBD_length', 'pop1_size', 'pop2_size', \
+                                 'IBD_len_SE'])
+    
+    ## For shorter computing time, 
+    ## Run multi-processing using non-mixed subpop OJs
+    partial_func = partial(write_oj_oj_pop_pair_ibd, oj_geo_id_dict=oj_geo_id_dict, oj_id_geo_dict=oj_id_geo_dict)
+    ## the pool occupies 23 threads(23 sub-populations of OJ in parallel, including the Italian & French "AJ")
+    ## There should be 23*(23-1)/2 pairs of OJs to compare IBD
+    pool = Pool(23)
+    pool.map(partial_func, jewish_pops)
+    pool.close()
+    pool.join()
+```
+
+### In addition, use the following script to detect inter-populatioj individual-wise IBD length between 76 non-Jewish populations
+
+
+```bash
+%%bash
+mkdir -p 76_nonJ_pop_inter_IBD -p IBD_segments_inter_76_nonJ_pops
+```
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+import re
+
+'''
+There're 1320 non-non-Jewish individuals from 76 sub-populations.
+This script presents average IBD segment length per pair in Centimorgans.
+'''
+
+def write_nj_nj_pop_pair_ibd(nj_pop: str, nj_pop_id_dict: dict, nj_id_pop_dict: dict):
+    ## Example of $nj_pop: "French_south" 
+    nj_pop_indivs = nj_pop_id_dict[nj_pop]
+    nj_pop_indivs_dict = {iid: "" for iid in nj_pop_indivs}
+    ## obtain the number of individuals from this non-Jewish population
+    nj_pop_size = len(nj_pop_indivs)
+    other_nj_row_names = []
+    for other_nj_id in nj_id_pop_dict.keys(): 
+        if nj_id_pop_dict[other_nj_id] == nj_pop: continue
+        other_nj_pop = nj_id_pop_dict[other_nj_id]
+        other_nj_row_names.append(f'{other_nj_pop}__{other_nj_id}')
+    nj_other_nj_df = pd.DataFrame(columns=nj_pop_indivs, index=other_nj_row_names)
+    for nj_id in nj_pop_indivs:
+        nj_other_nj_df[nj_id]=0
+    # Use this dict the store the following key:value pair
+    ## f'{NJ_POP_NAME}__{OTHER_NJ_POP_NAME}'(key): mean pairwise IBD length(float)
+    njsubpop_other_njsubpop_mean_pws_ibd_len = {}
+    nj_pop_ibd_seg_df_dict = {
+        other_nj_pop: pd.DataFrame(columns=[str(i) for i in range(12)]) 
+        for other_nj_pop in nj_pop_id_dict.keys() if not nj_pop == other_nj_pop 
+    }
+    ## Loop through 22 autosomes
+    for chr in range(1, 23):
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        df['id1'] = df['id1'].apply(lambda el: re.sub('^[0-9]+_', '', el))
+        df['id2'] = df['id2'].apply(lambda el: re.sub('^[0-9]+_', '', el))
+        nj_subpop_ibd_df = df.loc[
+            (df['id1'].isin(nj_pop_indivs_dict)) | (df['id2'].isin(nj_pop_indivs_dict)) 
+        ]
+        if chr == 1: 
+            for ibd_seg_df in nj_pop_ibd_seg_df_dict.values(): 
+                ibd_seg_df.columns = list(nj_subpop_ibd_df.columns)
+        for other_nj_pop in nj_pop_id_dict.keys():
+            #########################################################
+            # Filter into the corresponding IBD segments
+            if other_nj_pop == nj_pop: continue
+            other_nj_subpop_id_dict = {el: '' for el in nj_pop_id_dict[other_nj_pop]}
+            filtered_df = nj_subpop_ibd_df.loc[
+                (df['id1'].isin(other_nj_subpop_id_dict)) | (df['id2'].isin(other_nj_subpop_id_dict))
+            ]
+            nj_pop_ibd_seg_df_dict[other_nj_pop] = pd.concat([nj_pop_ibd_seg_df_dict[other_nj_pop], filtered_df])
+            other_nj_pop_size = len(nj_pop_id_dict[other_nj_pop])
+            pop_pair_str = f'{nj_pop}__{other_nj_pop}'
+            ## use the condition "nj_pop > other_nj_pop" to avoid replicate pairs, i.e. A & B and B & A
+            if nj_pop_size > 0 and other_nj_pop_size > 0 and nj_pop > other_nj_pop:
+                ## Create a string to describe the AJ subgroup-OJ subgroup pair
+                if pop_pair_str not in njsubpop_other_njsubpop_mean_pws_ibd_len:
+                    ## value of the dict is initially a list, [sum_of_ibd_lengths, subpop_size1, subpop_size2]
+                    njsubpop_other_njsubpop_mean_pws_ibd_len[pop_pair_str]=[0, nj_pop_size, other_nj_pop_size, {}]
+                njsubpop_other_njsubpop_mean_pws_ibd_len[pop_pair_str][0]+=filtered_df['cm_len'].sum()
+            ##################################################
+            # Output the CSV file storing IBD length between each pair of individuals
+            filtered_row_num = filtered_df.shape[0]
+            #print(chr, pop_pair_str, filtered_row_num)
+            for i in range(filtered_row_num):
+                ibd_row = filtered_df.iloc[i]
+                # id is in the form of f'{fid}_{iid}', $fid is a digit
+                ibd_len = ibd_row['cm_len']
+                id1, id2 = ibd_row['id1'], ibd_row['id2']
+                if id1 in nj_pop_indivs_dict and id2 in other_nj_subpop_id_dict:
+                    ## the prefix should be country name + 'AJ'
+                    id2_prefix = nj_id_pop_dict[id2]
+                    nj_other_nj_df.loc[f'{id2_prefix}__{id2}', id1]+=round(float(ibd_len), 5)
+                    ###Test
+                    #print(nj_other_nj_df.loc[f'{id2_prefix}__{id2}', id1])
+                    ###
+                    indiv_pair_key = f'{id1}__{id2}'
+                elif id2 in nj_pop_indivs_dict and id1 in other_nj_subpop_id_dict:
+                    id1_prefix = nj_id_pop_dict[id1]
+                    nj_other_nj_df.loc[f'{id1_prefix}__{id1}', id2]+=round(float(ibd_len), 5)
+                    indiv_pair_key = f'{id2}__{id1}'
+                if pop_pair_str in njsubpop_other_njsubpop_mean_pws_ibd_len:
+                    #print(pop_pair_str)
+                    #print(njsubpop_other_njsubpop_mean_pws_ibd_len[pop_pair_str][3].keys())
+                    if not indiv_pair_key in njsubpop_other_njsubpop_mean_pws_ibd_len[pop_pair_str][3]:
+                        njsubpop_other_njsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]=0
+                    njsubpop_other_njsubpop_mean_pws_ibd_len[pop_pair_str][3][indiv_pair_key]+=\
+                        round(float(ibd_len), 5)
+    ##########################################################################################
+    ##########################################################################################
+    for other_nj_pop, ibd_seg_df in nj_pop_ibd_seg_df_dict.items():
+        ibd_seg_df.to_csv(f"IBD_segments_inter_76_nonJ_pops/{nj_pop}__{other_nj_pop}_IBD_segs.csv", 
+                           encoding='utf-8', index=False)
+    # Finally, calculate the mean pairwise IBD length for AJ versus other AJs
+    ## after looping through 22 autosomes
+    ### This dict should have 14*48 items
+    with open("76_nonJ_inter_pop_mean_pairwise_ibd_length.csv", "a+") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ### This dict should have 14*13/2 items
+        for k, v in njsubpop_other_njsubpop_mean_pws_ibd_len.items():
+            if type(v) is list:
+                if len(v)==4:
+                    num_non_zero_ibd_indiv_pairs = len(v[3].keys())
+                    num_possible_pairs = int(v[1])*int(v[2])
+                    num_zeros_to_add = num_possible_pairs - num_non_zero_ibd_indiv_pairs
+                    v[3] = list(v[3].values())
+                    if num_zeros_to_add > 0:
+                        v[3].extend([0]*num_zeros_to_add)
+                    pop1=k.split("__")[0]
+                    pop2=k.split("__")[1]
+                    mean_v = round(v[0]/num_possible_pairs, 3)
+                    # v[3] is a list
+                    #print(v[3])
+                    ibd_csv_writer.writerow([pop1,pop2,str(mean_v),str(v[1]),str(v[2]),\
+                                             round(st.sem(v[3]), 3)])
+    #################################################################################################
+    ## Additionally, output 14 .csv files storing total IBD length between every pairs of individuals
+    ## after looping through 22 autosomes
+    ### Reference for conversion from df to csv: 
+    ####: https://towardsdatascience.com/how-to-export-pandas-dataframe-to-csv-2038e43d9c03
+    #### Write to an individual CSV file
+    #### "nj_pop" is a string like "French_south"
+    nj_other_nj_df.round(decimals=4).to_csv(f"76_nonJ_pop_inter_IBD/{nj_pop}_IBD.csv", encoding='utf-8')
+    
+
+if __name__ == '__main__':
+    # warnings.filterwarnings("ignore")
+    
+    ## load 1320 non-Jews from regions of interest to our dict
+    nj_pop_id_dict, nj_id_pop_dict = {}, {}
+    with open("76pop_non_jews_id_file_list.txt", "r") as f:
+        for line in f:
+            pop_name=line.strip().split("/")[2].split(".")[0]
+            if pop_name not in nj_pop_id_dict: nj_pop_id_dict[pop_name]=[]
+            with open(line.strip(), "r") as id_f:
+                for line in id_f:
+                    iid=line.strip()
+                    nj_pop_id_dict[pop_name].append(iid)
+                    if iid not in nj_id_pop_dict: nj_id_pop_dict[iid]=pop_name
+    
+    #print(jewish_pops)
+    ## Output .csv file for mean pairwise IBD length
+    with open("76_nonJ_inter_pop_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop1', 'pop2', 'mean_pairwise_IBD_length', 'pop1_size', 'pop2_size', \
+                                 'IBD_len_SE'])
+    
+    ## For shorter computing time, 
+    partial_func = partial(write_nj_nj_pop_pair_ibd, nj_pop_id_dict=nj_pop_id_dict, nj_id_pop_dict=nj_id_pop_dict)
+    ## There should be 76*(76-1)/2 pairs of NJs to compare IBD
+    pool = Pool(38)
+    pool.map(partial_func, list(nj_pop_id_dict.keys()))
+    pool.close()
+    pool.join()
+```
+
+
+### In addition, let's investigate intra-population IBD sharing of 76 non-Jewish populations groups using the following python script
+
+
+```bash
+%%bash
+mkdir -p 76_nonJ_pop_intra_IBD -p IBD_segments_intra_76_nonJ_pops
+```
+
+```python
+from multiprocessing import Pool
+import pandas as pd
+import csv 
+import numpy as np
+from os import path
+from functools import partial
+import scipy.stats as st
+import warnings
+import re
+
+def write_nj_intra_pop_pair_ibd(nj_pop: str, nj_pop_id_dict: dict):
+    nj_pop_indivs = nj_pop_id_dict[nj_pop]
+    ## obtain the number of individuals from this non-Jewish population
+    nj_pop_size = len(nj_pop_indivs)
+    ## exclude IBD between two haplotypes of the same individual
+    num_indiv_pairs = nj_pop_size*(nj_pop_size-1)/2
+    nj_indiv_pair_ibd_dict = {}
+    nj_pop_intra_ibd_seg_df = pd.DataFrame(columns=[str(i) for i in range(12)])
+    for i in range(nj_pop_size):
+        for j in range(i+1, nj_pop_size):
+            iid1, iid2 = nj_pop_indivs[i], nj_pop_indivs[j]
+            nj_indiv_pair_ibd_dict[f'{iid1}__{iid2}'] = 0
+    ## Create a dataframe to store sums of intra-population individual pairwise IBD length
+    ### Output the dataframe into a csv file later
+    nj_pop_intra_df = pd.DataFrame(columns=['IBD_cM'], index=list(nj_indiv_pair_ibd_dict.keys()))
+    nj_pop_intra_df['IBD_cM'] = 0
+    #print(nj_pop_intra_df.index)
+    ## Loop through 22 autosomes
+    for chr in range(1, 23):
+        ### Sum up IBD segment lengths chromosome-wise and obtain the mean value finally after loop
+        ibd_file = f'imputed935Jews_1320nonJews_reformatted/imputed935Jews_1320nonJews_L_m-200_chr{chr}.csv'
+        if not path.isfile(ibd_file): continue
+        df = pd.read_csv(ibd_file, header=0)
+        df['id1'] = df['id1'].apply(lambda iid: re.sub("[0-9]+_", "", iid))
+        df['id2'] = df['id2'].apply(lambda iid: re.sub("[0-9]+_", "", iid))
+        pop_intra_df = df.loc[\
+                (df['id1'].isin({iid: "" for iid in nj_pop_indivs})) & 
+                (df['id2'].isin({iid: "" for iid in nj_pop_indivs})) 
+            ]
+        if chr == 1: 
+            nj_pop_intra_ibd_seg_df.columns = list(pop_intra_df.columns)
+        nj_pop_intra_ibd_seg_df = pd.concat([nj_pop_intra_ibd_seg_df, pop_intra_df])
+        ibd_row_num = pop_intra_df.shape[0]
+        for i in range(ibd_row_num):
+            ibd_row = pop_intra_df.iloc[i]
+            # id is in the form of f'{fid}_{iid}', $fid is a digit
+            iid1=ibd_row['id1']
+            iid2=ibd_row['id2']
+            ibd_len = ibd_row['cm_len']
+            #print(iid1, iid2)
+            if f'{iid1}__{iid2}' in nj_indiv_pair_ibd_dict:
+                #print("matched")
+                nj_pop_intra_df.loc[f'{iid1}__{iid2}', 'IBD_cM']+=round(float(ibd_len), 5)
+            elif f'{iid2}__{iid1}' in nj_indiv_pair_ibd_dict:
+                #print("matched")
+                nj_pop_intra_df.loc[f'{iid2}__{iid1}', 'IBD_cM']+=round(float(ibd_len), 5)
+    ## Write the dataframe of selected IBD segments to CSV file
+    nj_pop_intra_ibd_seg_df.to_csv(f"IBD_segments_intra_76_nonJ_pops/{nj_pop}_IBD_segs.csv", 
+                           encoding='utf-8', index=False)
+    ## Write to the general CSV file
+    with open("76_nonJ_intra_pop_mean_pairwise_ibd_length.csv", "a") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        mean_v = round(nj_pop_intra_df['IBD_cM'].sum()/num_indiv_pairs, 3)
+        ibd_csv_writer.writerow([nj_pop, str(mean_v), nj_pop_size, \
+                                 round(st.sem(nj_pop_intra_df['IBD_cM'].tolist()), 3)])
+    ## Write to an individual CSV file
+    nj_pop_intra_df.round(decimals=4).to_csv(f"76_nonJ_pop_intra_IBD/{nj_pop}_intraIBD.csv", encoding='utf-8')
+
+
+if __name__ == '__main__':
+    #warnings.filterwarnings("ignore")
+    ## Non-Jewish ethnic groups in the given 
+    nj_pop_id_dict = {}
+    with open("76pop_non_jews_id_file_list.txt", "r") as f:
+        for line in f:
+            pop_name=line.strip().split("/")[2].split(".")[0]
+            if pop_name not in nj_pop_id_dict: nj_pop_id_dict[pop_name]=[]
+            with open(line.strip(), "r") as id_f:
+                for line in id_f:
+                    iid=line.strip()
+                    nj_pop_id_dict[pop_name].append(iid)
+    
+    ## Output .csv file for mean pairwise IBD length
+    with open("76_nonJ_intra_pop_mean_pairwise_ibd_length.csv", "w") as mean_pairwise_ibd_f:
+        ibd_csv_writer = csv.writer(mean_pairwise_ibd_f)
+        ibd_csv_writer.writerow(['pop', 'mean_pairwise_IBD_length', 'pop_size', 'IBD_len_SE'])
+    
+    ## For shorter computing time, 
+    ### run multi-processing for 76 populations occuyping 36 threads
+    partial_func = partial(write_nj_intra_pop_pair_ibd, nj_pop_id_dict=nj_pop_id_dict)
+    pool = Pool(38)
+    pool.map(partial_func, list(nj_pop_id_dict.keys()))
+    pool.close()
+    pool.join()
+```
