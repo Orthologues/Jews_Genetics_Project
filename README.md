@@ -11,20 +11,22 @@
 [Section II: Download and extract genotype data of Jews for IBD and GPS analyses](#sec2) <br />
 [Section III: Extract genotype data of non-Jews from regions of interest in Afro-Eurasia for subsequent IBD analyses](#sec3) <br />
 [Section IV: IBD inference by <code>phasedibd</code> and Extract of IBD segments](#sec4) <br />
-+ [Run phasedibd](#run-phasedibd)
-+ [Removing replicate individuals and close relatives(minimally half-cousins) from Jewish individuals](#jew-qc)
-+ [Extracting IBD segments between and within AJs, other Jews, and non-Jews](#ibd-analyses)
++ [**Run phasedibd**](#run-phasedibd)
++ [**Removing replicate individuals and close relatives(minimally half-cousins) from Jewish individuals**](#jew-qc)
++ [**Extracting IBD segments between and within AJs, other Jews, and non-Jews**](#ibd-analyses) <br />
+
 [Section V: Statistical and Hierarchical Clustering analyses (HCA) in R for IBD](#sec5) <br />
-+ [K-S test for the "local European proselyte hypothesis" for each AJ community](#null-hyp)
-+ [Heatmap and HCA 12 AJ communities](#aj-ibd)
-+ [Heatmap and HCA for all non-Jewish populations](#nj-ibd)
-+ [Heatmap, HCA, and K-S test for all non-Jewish populations and 12 AJ communities](#nj-all-aj-ibd)
-+ [Heatmap and HCA for all non-Jewish populations and each of the 12 AJ communities](#nj-each-aj-ibd)
-+ [Plotting all NJ populations, and closest NJ populations with each AJ community at map](#nj-map)
++ [**K-S test for the "local European proselyte hypothesis" for each AJ community**](#null-hyp)
++ [**Heatmap and HCA 12 AJ communities**](#aj-ibd)
++ [**Heatmap and HCA for all non-Jewish populations**](#nj-ibd)
++ [**Heatmap, HCA, and K-S test for all non-Jewish populations and 12 AJ communities**](#nj-all-aj-ibd)
++ [**Heatmap and HCA for all non-Jewish populations and each of the 12 AJ communities**](#nj-each-aj-ibd)
++ [**Plotting all NJ populations, and closest NJ populations with each AJ community at map**](#nj-map) <br />
+
 [Section VI: Preprocessing in Python, Plotting and HCA in R for GPS predictions](#sec6) <br />
-+ [Relocalize each AJ predicted to sea by GPS to the nearest shore in Python](#to-shore)
-+ [Heatmap HCA for GPS predictions in R](#gps-analyses)
-+ [Plotting biogeographical coordinates predicted by GPS in R](#aj-gps-map)
++ [**Relocalize each AJ predicted to sea by GPS to the nearest shore in Python**](#to-shore)
++ [**Heatmap HCA for GPS predictions in R**](#gps-analyses)
++ [**Plotting biogeographical coordinates predicted by GPS in R**](#aj-gps-map)
 
 
 <hr />
