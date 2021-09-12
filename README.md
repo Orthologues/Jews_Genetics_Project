@@ -8600,8 +8600,8 @@ ggplot() +
                fill = "#6f4e37", colour = "darkgrey") +
   scale_shape_manual(values=1:nlevels(gps_main_aj_results$Community)) +
   geom_point(data = gps_main_aj_results, 
-             aes(x = Long_pred, y = Lat_pred, shape = Community),
-             size=2, stroke = 0.8, colour='green') +
+             aes(x = Long_pred, y = Lat_pred, shape = Community, color = Community),
+             size=2, stroke = 0.8) +
   geom_text(data = countries_to_annotate, check_overlap = FALSE, 
             color="#AFAFAF", fontface="bold",
             size=8.5, aes(x=long, y=lat, label=country)) +
@@ -8683,8 +8683,8 @@ ggplot() +
                fill = "#6f4e37", colour = "darkgrey") +
   scale_shape_manual(values=1:nlevels(gps_aj_to_shore_results$Community)) +
   geom_point(data = gps_aj_to_shore_results, 
-             aes(x = Long_pred, y = Lat_pred, shape = Community),
-             size=2, stroke = 0.8, colour='green') +
+             aes(x = Long_pred, y = Lat_pred, shape = Community, color = Community),
+             size=2, stroke = 0.8) +
   geom_text(data = countries_to_annotate, check_overlap = FALSE, 
             color="#AFAFAF", fontface="bold",
             size=8.5, aes(x=long, y=lat, label=country)) +
