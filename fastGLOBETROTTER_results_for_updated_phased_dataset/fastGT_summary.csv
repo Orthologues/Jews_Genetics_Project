@@ -1,0 +1,11 @@
+inferred_pop,conclusion,N_generations_ago,event,PC,boot_gen_low95_CI,boot_gen_high95_CI,Central Africans,Central Asian and Siberian populations,Central Europeans,East Africans,Eastern Europeans,Middle Easterners,North Africans,Northern Europeans,South Asians,Southeastern Europeans,Southern Europeans,Turkish-Caucasus populations,Western Europeans
+Uzbek-Jew,one-date-multiway,42.83,1,1,36.65,41.42,0.0,0.0783,0,0,0.0053,0.3498,0.0124,0.0025,0.0143,0.0,0.3108,0.2266,0.0
+Uzbek-Jew,one-date-multiway,42.83,1,2,36.65,41.42,0.0118,0.0769,0,0,0.0088,0.3302,0.0365,0.0294,0.0529,0.0253,0.2169,0.1766,0.0349
+Yemenite-Highlands,one-date-multiway,26.53,1,1,29.54,31.24,0.0851,0.0,0,0.0239,0.0,0.6853,0.0,0.0,0.0,0.0,0.0,0.2056,0.0
+Yemenite-Highlands,one-date-multiway,26.53,1,2,29.54,31.24,0.0376,0.0132,0,0.0175,0.0037,0.7548,0.0004,0.0115,0.0041,0.0031,0.0064,0.1219,0.0258
+Turk-Northwest,one-date,25.25,1,1,25.55,26.58,0,0.1875,0.0703,0,0.016,0.0466,0,0,0,0.0706,0.1943,0.4145,0
+Cochin-Jew,one-date,7.65,1,1,6.53,8.02,0,0.0222,0,0,0,0.1456,0.0439,0,0.6702,0,0.0668,0.0514,0
+Turk-West,one-date,20.0,1,1,20.61,21.52,0,0.22,0.0226,0,0.0284,0.1059,0,0,0,0.0462,0.2226,0.3542,0
+Turk-Central,one-date,28.42,1,1,28.99,30.48,0,0.12,0,0,0.0227,0.0871,0,0,0,0.016,0.2836,0.4708,0
+Italian-Jew,one-date,43.75,1,1,46.85,51.2,0,0.0084,0.0429,0,0,0.1184,0.1565,0,0,0.0115,0.3318,0.105,0.2255
+Turk-South,one-date,25.12,1,1,23.31,25.2,0,0.1028,0,0,0.0097,0.3912,0,0,0.003,0.0249,0.0678,0.4005,0

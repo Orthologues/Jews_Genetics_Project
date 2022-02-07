@@ -1,0 +1,179 @@
+pop,color,pop_group
+Afar,chocolate,East Africans
+Eritrean,chocolate,East Africans
+Somali,chocolate,East Africans
+Algerian,darkgoldenrod,North Africans
+Egyptian,darkgoldenrod,North Africans
+Libyan,darkgoldenrod,North Africans
+Moroccan,darkgoldenrod,North Africans
+Mozabite,darkgoldenrod,North Africans
+Shaigi,darkgoldenrod,North Africans
+Tunisian,darkgoldenrod,North Africans
+Assyrian-MiddleEast,darkgreen,Middle Easterners
+BedouinA,darkgreen,Middle Easterners
+BedouinB,darkgreen,Middle Easterners
+Druze,darkgreen,Middle Easterners
+Iranian-Central,darkgreen,Middle Easterners
+Iranian-North,darkgreen,Middle Easterners
+Iranian-South,darkgreen,Middle Easterners
+Jordanian,darkgreen,Middle Easterners
+Kurd,darkgreen,Middle Easterners
+Lebanese-Christian,darkgreen,Middle Easterners
+Lebanese-Muslim,darkgreen,Middle Easterners
+Palestinian,darkgreen,Middle Easterners
+Saudi,darkgreen,Middle Easterners
+Syrian,darkgreen,Middle Easterners
+Yemenite-Desert,darkgreen,Middle Easterners
+Yemenite-Highlands,darkgreen,Middle Easterners
+Yemenite-Northwest,darkgreen,Middle Easterners
+Abkhasian,lightgreen,Turkish-Caucasus populations
+Adygei,lightgreen,Turkish-Caucasus populations
+Armenian,lightgreen,Turkish-Caucasus populations
+Assyrian-Caucasus,lightgreen,Turkish-Caucasus populations
+Avar,lightgreen,Turkish-Caucasus populations
+Azeri,lightgreen,Turkish-Caucasus populations
+Balkar,lightgreen,Turkish-Caucasus populations
+Chechen,lightgreen,Turkish-Caucasus populations
+Circassian,lightgreen,Turkish-Caucasus populations
+Darginian,lightgreen,Turkish-Caucasus populations
+Georgian,lightgreen,Turkish-Caucasus populations
+Hemshin,lightgreen,Turkish-Caucasus populations
+Ingush,lightgreen,Turkish-Caucasus populations
+Kabardian,lightgreen,Turkish-Caucasus populations
+Karachay,lightgreen,Turkish-Caucasus populations
+Kumyk,lightgreen,Turkish-Caucasus populations
+Lak,lightgreen,Turkish-Caucasus populations
+Lezgin,lightgreen,Turkish-Caucasus populations
+Nogai,lightgreen,Turkish-Caucasus populations
+Ossetian,lightgreen,Turkish-Caucasus populations
+Tabasaran,lightgreen,Turkish-Caucasus populations
+Turk-Central,lightgreen,Turkish-Caucasus populations
+Turk-Northeast,lightgreen,Turkish-Caucasus populations
+Turk-Northwest,lightgreen,Turkish-Caucasus populations
+Turk-South,lightgreen,Turkish-Caucasus populations
+Turk-West,lightgreen,Turkish-Caucasus populations
+Finn,yellow,Northern Europeans
+Icelandic,yellow,Northern Europeans
+Karelian,yellow,Northern Europeans
+Norwegian,yellow,Northern Europeans
+Swede,yellow,Northern Europeans
+Czech,black,Central Europeans
+German,black,Central Europeans
+Hungarian,black,Central Europeans
+Pole,black,Central Europeans
+Slovakian,black,Central Europeans
+Slovenian,black,Central Europeans
+Basque-France,blue,Western Europeans
+English-Southeast,blue,Western Europeans
+English-Southwest,blue,Western Europeans
+French-North,blue,Western Europeans
+French-Northeast,blue,Western Europeans
+French-Northwest,blue,Western Europeans
+French-Southeast,blue,Western Europeans
+French-Southwest,blue,Western Europeans
+Orcadian,blue,Western Europeans
+Scot,blue,Western Europeans
+Basque-Spain,orange,Southern Europeans
+Corsican,orange,Southern Europeans
+Cypriot,orange,Southern Europeans
+Greek-North,orange,Southern Europeans
+Greek-South,orange,Southern Europeans
+Italian-North,orange,Southern Europeans
+Italian-Northwest,orange,Southern Europeans
+Italian-South,orange,Southern Europeans
+Maltese,orange,Southern Europeans
+Portuguese,orange,Southern Europeans
+Roman-Iberia,orange,Southern Europeans
+Sardinian,orange,Southern Europeans
+Sicilian-East,orange,Southern Europeans
+Sicilian-West,orange,Southern Europeans
+Spanish-Balearic,orange,Southern Europeans
+Spanish-Catalonia,orange,Southern Europeans
+Spanish-Central,orange,Southern Europeans
+Spanish-North,orange,Southern Europeans
+Spanish-Northwest,orange,Southern Europeans
+Spanish-South,orange,Southern Europeans
+Spanish-Valencia,orange,Southern Europeans
+Tuscan,orange,Southern Europeans
+Albanian,lightpink,Southeastern Europeans
+Bulgarian,lightpink,Southeastern Europeans
+Croat,lightpink,Southeastern Europeans
+Gagauz,lightpink,Southeastern Europeans
+Romanian,lightpink,Southeastern Europeans
+Bashkir,red,Eastern Europeans
+Belarusian,red,Eastern Europeans
+Chuvash,red,Eastern Europeans
+Cossack,red,Eastern Europeans
+Estonian,red,Eastern Europeans
+Komi,red,Eastern Europeans
+Kryashen,red,Eastern Europeans
+Latvian,red,Eastern Europeans
+Lithuanian,red,Eastern Europeans
+Moldavian,red,Eastern Europeans
+Mordvin,red,Eastern Europeans
+Russian-Arctic,red,Eastern Europeans
+Russian-Central,red,Eastern Europeans
+Russian-Northwest,red,Eastern Europeans
+Russian-Southwest,red,Eastern Europeans
+Tatar-Volga,red,Eastern Europeans
+Udmurt,red,Eastern Europeans
+Ukranian-Central,red,Eastern Europeans
+Ukranian-East,red,Eastern Europeans
+Ukranian-West,red,Eastern Europeans
+Veps,red,Eastern Europeans
+Hazara,blueviolet,Central Asian and Siberian populations
+Karakalpak,blueviolet,Central Asian and Siberian populations
+Kazakh-East,blueviolet,Central Asian and Siberian populations
+Kazakh-West,blueviolet,Central Asian and Siberian populations
+Kyrgyz-North,blueviolet,Central Asian and Siberian populations
+Kyrgyz-South,blueviolet,Central Asian and Siberian populations
+Mansi,blueviolet,Central Asian and Siberian populations
+Pashtun,blueviolet,Central Asian and Siberian populations
+Tajik,blueviolet,Central Asian and Siberian populations
+Tatar-Siberia,blueviolet,Central Asian and Siberian populations
+Turkmen,blueviolet,Central Asian and Siberian populations
+Uyghur-North,blueviolet,Central Asian and Siberian populations
+Uzbek-East,blueviolet,Central Asian and Siberian populations
+Uzbek-West,blueviolet,Central Asian and Siberian populations
+Baloch,saddlebrown,South Asians
+Bengali,saddlebrown,South Asians
+Brahmin,saddlebrown,South Asians
+Brahui,saddlebrown,South Asians
+Gujarati,saddlebrown,South Asians
+Punjabi,saddlebrown,South Asians
+Sindhi,saddlebrown,South Asians
+Austria-AJ,midnightblue,Ashkenazic Jews
+Belarus-AJ,midnightblue,Ashkenazic Jews
+Czechia-AJ,midnightblue,Ashkenazic Jews
+Germany-AJ,midnightblue,Ashkenazic Jews
+Hungary-AJ,midnightblue,Ashkenazic Jews
+Latvia-AJ,midnightblue,Ashkenazic Jews
+Lithuania-AJ,midnightblue,Ashkenazic Jews
+Netherlands-AJ,midnightblue,Ashkenazic Jews
+Poland-AJ,midnightblue,Ashkenazic Jews
+Romania-AJ,midnightblue,Ashkenazic Jews
+Russia-AJ,midnightblue,Ashkenazic Jews
+Ukraine-AJ,midnightblue,Ashkenazic Jews
+general-AJ,midnightblue,Ashkenazic Jews
+mixed-AJ,midnightblue,Ashkenazic Jews
+Bulgarian-Jew,indigo,Sephardic Jews
+French-Jew,indigo,Sephardic Jews
+Iberian-Jew,indigo,Sephardic Jews
+Italian-Jew,indigo,Sephardic Jews
+Turkish-Jew,indigo,Sephardic Jews
+Libyan-Jew,magenta,North African Jews
+Moroccan-Jew,magenta,North African Jews
+Tunisian-Jew,magenta,North African Jews
+Ethiopian-Jew,aquamarine,Ethiopian Jews
+Yemenite-Jew,darkseagreen,Yemenite Jews
+Azeri-Jew,skyblue,Mizrahic Jews
+Cochin-Jew,skyblue,Mizrahic Jews
+Georgian-Jew,skyblue,Mizrahic Jews
+Iranian-Jew,skyblue,Mizrahic Jews
+Iraqi-Jew,skyblue,Mizrahic Jews
+Kurdish-Jew,skyblue,Mizrahic Jews
+Uzbek-Jew,skyblue,Mizrahic Jews
+Khanty,blueviolet,Central Asian and Siberian populations
+Saami,yellow,Northern Europeans
+Roman-Bosnia,lightpink,Southeastern Europeans
+Pygmy-Congo,dimgrey,Central Africans
